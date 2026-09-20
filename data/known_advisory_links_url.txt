@@ -1,0 +1,91 @@
+# ==============================================================================
+# Known Vendor Security Advisories & Official Bulletins
+# Used by ATI V2 Heuristic Fast-Path Link Classifier
+# ==============================================================================
+
+# ICS / SCADA / Industrial OT Hardware Vendors
+siemens.com/cert/advisories
+cert-portal.siemens.com/productcert
+se.com/ww/en/work/support/cybersecurity/security-notifications
+schneider-electric.com/en/support
+rockwellautomation.com/en-us/trust-center/security-advisories
+moxa.com/en/support/product-support/security-advisory
+advantech.com/en/support/security-bulletin
+abb.com/cybersecurity
+honeywell.com/us/en/cybersecurity
+omron.com/global/en/security
+yokogawa.com/library/resources/announcements
+phoenixcontact.com/security
+wago.com/global/cybersecurity
+
+# Government & Critical Infrastructure CSIRTs
+cisa.gov/news-events/ics-advisories
+cisa.gov/news-events/ics-medical-advisories
+cisa.gov/known-exploited-vulnerabilities
+kb.cert.org/vuls/id
+cert.europa.eu/publications/security-advisories
+bsi.bund.de/EN/Service-Navi/Publications/Security-Advisories
+ncsc.gov.uk/alerts-advisories
+
+# IoT, IP Cameras, NAS & Embedded Network Hardware
+hikvision.com/en/support/cybersecurity/security-advisory
+dahuasecurity.com/support/cybersecurity/advisory
+qnap.com/en/security-advisory
+synology.com/en-global/security/advisory
+kb.netgear.com/
+tp-link.com/en/support/security-advisory
+dlink.com/en/security-bulletin
+asus.com/support/security-advisory
+axis.com/support/cybersecurity
+ubnt.com/security-advisory
+ui.com/security-advisory
+synology.com/releaseNote
+
+# Enterprise Network, Firewall, Gateways & Edge Infrastructure
+fortiguard.com/psirt
+security.paloaltonetworks.com
+sec.cloudapps.cisco.com/security/center
+cisco.com/c/en/us/support/docs/cisa
+checkpoint.com/advisories
+my.f5.com/manage/s/article/
+support.f5.com/csp/article
+juniper.net/alerts
+sonicwall.com/support/security-notice
+barracuda.com/support/security-advisories
+ivanti.com/support/security-advisory
+citrix.com/support/security-bulletins
+sophos.com/en-us/security-advisories
+watchguard.com/wgrd-trust-center/advisories
+
+# Enterprise Operating Systems & Cloud Platforms
+msrc.microsoft.com/update-guide/vulnerability
+portal.msrc.microsoft.com
+support.microsoft.com/help
+support.apple.com/en-us/HT
+access.redhat.com/security/cve
+access.redhat.com/errata
+ubuntu.com/security/notices
+debian.org/security
+security.archlinux.org
+suse.com/security/cve
+aws.amazon.com/security/security-bulletins
+cloud.google.com/security/bulletins
+oracle.com/security-alerts
+vmware.com/security/advisories
+broadcom.com/support/security-advisories
+
+# Bug Trackers & Advisory Portals
+github.com/.*/security/advisories
+gitlab.com/.*/-/security/advisories
+zerodayinitiative.com/advisories
+talosintelligence.com/vulnerability_reports
+trendmicro.com/vinfo/us/threat-encyclopedia
+qualys.com/research/security-advisories
+rapid7.com/db/vulnerabilities
+snyk.io/vuln/
+vuldb.com/?id
+tenable.com/cve/
+tenable.com/plugins
+nvd.nist.gov/vuln/detail
+cve.mitre.org/cgi-bin/cvename.cgi
+cve.org/CVERecord

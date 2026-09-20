@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATI V2 | Automated Threat Intelligence & OSINT Command Center</title>
+    <!-- Modern Typography & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Favicon & Brand Icons -->
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="cyber-theme">
+    <div class="app-layout">
+        <!-- SIDEBAR NAVIGATION -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-icon">🛡️</div>
+                <div class="logo-text">
+                    <span class="logo-title">ATI <span class="accent-badge">V2.0</span></span>
+                    <span class="logo-subtitle">Threat Intel Command</span>
+                </div>
+            </div>
+
+            <div class="system-status-pill">
+                <span class="pulse-dot"></span>
+                <span id="system-status-text">HUNTER AGENT: ONLINE</span>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#dashboard" class="nav-item active" data-view="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-label">Hunter Dashboard</span>
+                </a>
+                <a href="#cves" class="nav-item" data-view="cves">
+                    <span class="nav-icon">🔍</span>
+                    <span class="nav-label">CVE Explorer</span>
+                </a>
+                <a href="#scans" class="nav-item" data-view="scans">
+                    <span class="nav-icon">🎯</span>
+                    <span class="nav-label">Hunt Launcher</span>
+                </a>
+                <a href="#osint" class="nav-item" data-view="osint">
+                    <span class="nav-icon">📡</span>
+                    <span class="nav-label">OSINT Radar</span>
+                </a>
+                <a href="#iot-ot" class="nav-item" data-view="iot-ot">
+                    <span class="nav-icon">🏭</span>
+                    <span class="nav-label">IoT / OT Watch</span>
+                </a>
+                <a href="#reports" class="nav-item" data-view="reports">
+                    <span class="nav-icon">📑</span>
+                    <span class="nav-label">Reports & Export</span>
+                </a>
+                <a href="#assets" class="nav-item" data-view="assets">
+                    <span class="nav-icon">🏢</span>
+                    <span class="nav-label">Owned Assets <span class="badge-dev">DEV</span></span>
+                </a>
+                <a href="#system" class="nav-item" data-view="system">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-label">LLM Gateway</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="footer-meta">
+                    <span>Engine: Multi-Provider AI (Groq + Gemini + OpenRouter)</span>
+                    <span>Database: SQLite (Encrypted)</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT AREA -->
+        <main class="main-content">
+            <!-- TOP APP BAR -->
+            <header class="top-bar">
+                <div class="top-bar-left">
+                    <div class="breadcrumb" id="current-view-title">Executive Threat Hunter Dashboard</div>
+                </div>
+                <div class="top-bar-right">
+                    <div class="search-box-quick">
+                        <span class="search-icon">🔎</span>
+                        <input type="text" id="quick-cve-search" placeholder="Quick Search CVE / Vendor / PoC..." autocomplete="off">
+                    </div>
+                    <div class="clock-display" id="live-clock">--:--:-- IST</div>
+                    <button id="btn-enrich-db" class="btn btn-secondary" onclick="toggleEnrichDb()" title="On-Demand Database & AI Threat Enrichment" style="display: flex; align-items: center; gap: 6px; font-weight: 600;">
+                        <span id="enrich-btn-icon">⚡</span>
+                        <span id="enrich-btn-text">Enrich DB</span>
+                    </button>
+                    <button class="btn btn-primary btn-glow" onclick="navigateTo('scans')">
+                        <span>🎯 Launch Threat Hunt</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- VIEW CONTAINER -->
+            <div class="content-body">
+                
+                <!-- ======================================================== -->
+                <!-- 1. DASHBOARD VIEW -->
+                <!-- ======================================================== -->
+                <section id="view-dashboard" class="app-view active">
+                    <!-- KPI CARDS GRID -->
+                    <div class="kpi-grid">
+                        <div class="kpi-card card-cyan">
+                            <div class="kpi-icon">🛡️</div>
+                            <div class="kpi-info">
+                                <span class="kpi-label">Total Tracked CVEs</span>
+                                <span class="kpi-value" id="kpi-total">--</span>
+                            </div>
+                            <div class="kpi-sub">Ingested from NIST NVD 2.0</div>
+                        </div>
+
+                        <div class="kpi-card card-crimson">
+                            <div class="kpi-icon">🚨</div>
+                            <div class="kpi-info">
+                                <span class="kpi-label">Critical Severity</span>
+                                <span class="kpi-value" id="kpi-critical">--</span>
+                            </div>
+                            <div class="kpi-sub">CVSS 9.0 - 10.0 Threshold</div>
+                        </div>
+
+                        <div class="kpi-card card-amber">
+                            <div class="kpi-icon">🔥</div>
+                            <div class="kpi-info">
+                                <span class="kpi-label">Weaponized PoCs</span>
+                                <span class="kpi-value" id="kpi-pocs">--</span>
+                            </div>
+                            <div class="kpi-sub">Nuclei / MSF / Trickest / GitHub</div>
+                        </div>
+
+                        <div class="kpi-card card-purple">
+                            <div class="kpi-icon">⚡</div>
+                            <div class="kpi-info">
+                                <span class="kpi-label">AI Analyzed Threats</span>
+                                <span class="kpi-value" id="kpi-analyzed">--</span>
+                            </div>
+                            <div class="kpi-sub">Multi-Provider AI Verified</div>
+                        </div>
+                    </div>
+
+                    <!-- DASHBOARD CONTENT SPLIT -->
+                    <div class="dashboard-split">
+                        <!-- TOP ACTIONABLE THREATS TABLE -->
+                        <div class="panel panel-threats">
+                            <div class="panel-header">
+                                <h3>🔥 High-Priority Actionable Threats</h3>
+                                <button class="btn btn-xs btn-outline" onclick="navigateTo('cves')">View All CVEs ➔</button>
+                            </div>
+                            <div class="panel-body">
+                                <div class="table-container">
+                                    <table class="cyber-table" id="dashboard-threats-table">
+                                        <thead>
+                                            <tr>
+                                                <th>CVE ID</th>
+                                                <th>Severity</th>
+                                                <th>EPSS</th>
+                                                <th>Vendor & Product</th>
+                                                <th>PoC Status</th>
+                                                <th>AI Recommendation</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="dashboard-threats-body">
+                                            <tr><td colspan="6" class="text-center">Loading live intelligence...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- STATS & RADAR CHARTS -->
+                        <div class="panel panel-charts">
+                            <div class="panel-header">
+                                <h3>📊 Threat Distribution & Tags</h3>
+                            </div>
+                            <div class="panel-body">
+                                <div class="chart-section">
+                                    <h4 class="chart-title">Severity Breakdown</h4>
+                                    <div class="severity-bars" id="severity-bars-container">
+                                        <!-- Injected dynamically -->
+                                    </div>
+                                </div>
+
+                                <hr class="cyber-divider">
+
+                                <div class="chart-section">
+                                    <h4 class="chart-title">Trending Attack Vectors (Keywords)</h4>
+                                    <div class="tag-cloud" id="keyword-cloud-container">
+                                        <!-- Injected dynamically -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ======================================================== -->
+                <!-- 2. CVE EXPLORER VIEW -->
+                <!-- ======================================================== -->
+                <section id="view-cves" class="app-view">
+                    <!-- FILTER TOOLBAR -->
+                    <div class="filter-toolbar">
+                        <div class="filter-group">
+                            <input type="text" id="cve-search-input" class="cyber-input" placeholder="Search by CVE ID, vendor, product, keywords...">
+                            
+                            <select id="filter-severity" class="cyber-select">
+                                <option value="">All Severities</option>
+                                <option value="Critical">Critical (9.0 - 10.0)</option>
+                                <option value="High">High (7.0 - 8.9)</option>
+                                <option value="Medium">Medium (4.0 - 6.9)</option>
+                                <option value="Low">Low (0.1 - 3.9)</option>
+                            </select>
+
+                            <select id="filter-sort" class="cyber-select">
+                                <option value="cvss_v3_score">Sort by CVSS Score</option>
+                                <option value="epss_score">Sort by EPSS Probability</option>
+                                <option value="published_date">Sort by Published Date</option>
+                                <option value="osint_mention_count">Sort by OSINT Mentions</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-checkboxes">
+                            <label class="cyber-checkbox"><input type="checkbox" id="chk-poc"><span>Public PoC</span></label>
+                            <label class="cyber-checkbox"><input type="checkbox" id="chk-cisa"><span>CISA KEV</span></label>
+                            <label class="cyber-checkbox"><input type="checkbox" id="chk-iot"><span>IoT / OT</span></label>
+                            <label class="cyber-checkbox"><input type="checkbox" id="chk-osint"><span>OSINT Hit</span></label>
+                            <label class="cyber-checkbox"><input type="checkbox" id="chk-analyzed"><span>AI Analyzed</span></label>
+                            <label class="cyber-checkbox"><input type="checkbox" id="chk-iocs"><span>Has Threat IoCs</span></label>
+                            <button class="btn btn-secondary btn-sm" id="btn-reset-filters">Reset</button>
+                            <button class="btn btn-primary btn-sm" id="btn-enrich-cisa" onclick="openCisaEnrichModal()" style="margin-left:auto; display:inline-flex; align-items:center; gap:6px;" title="Ingest technical NIST metrics & EPSS for CISA KEV entries without AI tokens">
+                                ⚡ Enrich DB with CISA Analysis
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- CVE TABLE -->
+                    <div class="table-container panel">
+                        <table class="cyber-table">
+                            <thead>
+                                <tr>
+                                    <th>CVE ID</th>
+                                    <th>Severity / CVSS</th>
+                                    <th>EPSS Prob.</th>
+                                    <th>Vendor & Product</th>
+                                    <th>Exploit Weaponization</th>
+                                    <th>AI Analysis</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cve-table-body">
+                                <tr><td colspan="7" class="text-center">Loading CVE intelligence...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- PAGINATION CONTROLS -->
+                    <div class="pagination-bar">
+                        <span id="pagination-info">Showing 0-0 of 0</span>
+                        <div class="pagination-btns">
+                            <button class="btn btn-sm btn-outline" id="btn-prev-page" disabled>◀ Previous</button>
+                            <span class="page-indicator" id="current-page-num">1</span>
+                            <button class="btn btn-sm btn-outline" id="btn-next-page" disabled>Next ▶</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ======================================================== -->
+                <!-- 3. HUNT LAUNCHER & LIVE TERMINAL VIEW -->
+                <!-- ======================================================== -->
+                <section id="view-scans" class="app-view">
+                    <div class="scans-layout">
+                        <!-- HUNT CONFIGURATION PANEL -->
+                        <div class="panel">
+                            <div class="panel-header">
+                                <h3>🎯 Threat Hunt Presets & Custom Flag Builder</h3>
+                            </div>
+                            <div class="panel-body">
+                                <div class="scan-presets-grid">
+                                    <div class="preset-card active" data-mode="single">
+                                        <div class="preset-badge">Targeted</div>
+                                        <h4>🎯 Single CVE Deep-Dive</h4>
+                                        <p>Hyper-focused scrape, exploit search (Nuclei/MSF), and AI analysis for a specific CVE.</p>
+                                    </div>
+
+                                    <div class="preset-card" data-mode="osint">
+                                        <div class="preset-badge">Zero-Day</div>
+                                        <h4>🔥 In-the-Wild OSINT Hunt</h4>
+                                        <p>Scrapes HackerNews & Reddit concurrently for trending unverified threats.</p>
+                                    </div>
+
+                                    <div class="preset-card" data-mode="weekly">
+                                        <div class="preset-badge">Weekly</div>
+                                        <h4>⚡ Active Week Exploits</h4>
+                                        <p>7-day lookback filtering for EPSS > 5%, CISA KEV listings, or weaponized PoCs.</p>
+                                    </div>
+
+                                    <div class="preset-card" data-mode="iotot">
+                                        <div class="preset-badge">Hardware</div>
+                                        <h4>🏭 IoT / OT Hardware Sweep</h4>
+                                        <p>NIST query targeting SCADA, PLC, ICS, and firmware vulnerabilities with all severities.</p>
+                                    </div>
+
+                                    <div class="preset-card" data-mode="date_audit">
+                                        <div class="preset-badge">Audit</div>
+                                        <h4>📅 Historical Date Audit</h4>
+                                        <p>Custom date range scan with CISA KEV merging and exploit hunting.</p>
+                                    </div>
+
+                                    <div class="preset-card" data-mode="custom">
+                                        <div class="preset-badge" style="background: rgba(6, 182, 212, 0.2); color: var(--accent-cyan); border-color: var(--accent-cyan);">Advanced</div>
+                                        <h4>🛠️ Custom Threat Hunt</h4>
+                                        <p>Customize every CLI flag (dates, count, KEV, IoT, PoC hunt, all severities) with live command generation.</p>
+                                    </div>
+                                </div>
+
+                                <!-- DYNAMIC PARAMETERS FORM -->
+                                <div class="scan-parameters-form" id="scan-form-container">
+                                    <!-- STANDARD FIELDS -->
+                                    <div class="form-row" id="row-cve-input">
+                                        <label>Target CVE Identifier (`--cve`):</label>
+                                        <input type="text" id="scan-cve-id" class="cyber-input" placeholder="e.g. CVE-2024-38063" value="CVE-2024-38063">
+                                    </div>
+
+                                    <div class="form-row date-range-row hidden" id="row-dates-input">
+                                        <div>
+                                            <label>Start Date (`--start`):</label>
+                                            <input type="date" id="scan-start-date" class="cyber-input">
+                                        </div>
+                                        <div>
+                                            <label>End Date (`--end`):</label>
+                                            <input type="date" id="scan-end-date" class="cyber-input">
+                                        </div>
+                                    </div>
+
+                                    <div class="form-row count-row hidden" id="row-count-input">
+                                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                                            <label class="cyber-checkbox" style="margin-bottom:0;">
+                                                <input type="checkbox" id="scan-count-enable">
+                                                <span>Limit Vulnerability Count (`--count`)</span>
+                                            </label>
+                                            <span style="font-size:11px; color:var(--text-muted);" id="count-status-label">Default: Process All CVEs</span>
+                                        </div>
+                                        <div id="count-input-wrapper" style="opacity:0.4; pointer-events:none; transition:opacity 0.2s ease;">
+                                            <input type="number" id="scan-count" class="cyber-input" value="10" min="1" max="500" placeholder="Limit count (e.g., 10)">
+                                        </div>
+                                    </div>
+
+                                    <!-- CUSTOM FLAG TOGGLES -->
+                                    <div class="form-toggles" id="standard-toggles">
+                                        <label class="cyber-checkbox"><input type="checkbox" id="scan-exploit-find" checked><span>`--exploit-find` Actively Hunt Exploits (GitHub/Nuclei/MSF)</span></label>
+                                        <label class="cyber-checkbox"><input type="checkbox" id="scan-cisa"><span>`--cisa` Include CISA KEV Catalog</span></label>
+                                        <label class="cyber-checkbox"><input type="checkbox" id="scan-all-sev"><span>`--all-severity` Include Medium & Low Severities</span></label>
+                                    </div>
+
+                                    <!-- ADDITIONAL CUSTOM FLAGS (SHOWN WHEN IN CUSTOM MODE) -->
+                                    <div class="form-toggles hidden" id="extra-custom-toggles" style="border-top: 1px dashed var(--border-color); padding-top: 10px; margin-top: 10px;">
+                                        <label class="cyber-checkbox"><input type="checkbox" id="scan-iotot"><span>`--iotot` Filter Strictly for IoT, ICS & OT Hardware</span></label>
+                                        <label class="cyber-checkbox"><input type="checkbox" id="scan-active-week"><span>`--active-week-exploits` 7-Day Trending Weaponized Vulnerabilities</span></label>
+                                        <label class="cyber-checkbox"><input type="checkbox" id="scan-in-wild"><span>`--in-wild-osint` In-The-Wild Social Scrapers (HackerNews/Reddit)</span></label>
+                                    </div>
+
+                                    <!-- LIVE CLI COMMAND GENERATOR BOX -->
+                                    <div class="cli-preview-box" id="cli-preview-container">
+                                        <div class="cli-preview-header">
+                                            <span>💻 Generated CLI Command Preview</span>
+                                            <button type="button" class="btn-copy-cli" onclick="copyCliCommand()">Copy Command</button>
+                                        </div>
+                                        <pre class="cli-code"><code id="cli-command-preview">python main.py --cve CVE-2024-38063 --exploit-find</code></pre>
+                                    </div>
+
+                                    <button class="btn btn-primary btn-glow btn-block" id="btn-execute-scan" style="margin-top: 16px;">
+                                        <span>🎯 Launch Threat Hunt</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- LIVE STREAMING TERMINAL -->
+                        <div class="panel panel-terminal">
+                            <div class="terminal-header">
+                                <div class="terminal-dots">
+                                    <span class="dot dot-red"></span>
+                                    <span class="dot dot-yellow"></span>
+                                    <span class="dot dot-green"></span>
+                                </div>
+                                <div class="terminal-title">LIVE THREAT HUNT TERMINAL (SSE STREAM)</div>
+                                <button class="btn btn-xs btn-outline" id="btn-clear-terminal">Clear Console</button>
+                            </div>
+                            <div class="terminal-body" id="scan-terminal-output">
+                                <div class="terminal-line text-muted">[Hunter System] Ready. Select a threat hunt preset or customize CLI flags and click Launch to start.</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ======================================================== -->
+                <!-- 4. OSINT RADAR VIEW (15-DAY MULTI-STREAM INTELLIGENCE) -->
+                <!-- ======================================================== -->
+                <section id="view-osint" class="app-view">
+                    <!-- TOP KPI TELEMETRY STRIP -->
+                    <div class="kpi-grid" style="margin-bottom: 20px;">
+                        <div class="kpi-card card-cyan">
+                            <div class="kpi-icon">📡</div>
+                            <div class="kpi-info">
+                                <span class="kpi-label">Active 15-Day Threats</span>
+                                <span class="kpi-value" id="osint-kpi-total">--</span>
+                            </div>
+                            <div class="kpi-sub">Multi-Stream Correlated CVEs</div>
+                        </div>
+                        <div class="kpi-card card-crimson">
+                            <div class="kpi-icon">🛡️</div>
+                            <div class="kpi-info">
+                                <span class="kpi-label">CISA KEV Confirmed</span>
+                                <span class="kpi-value" id="osint-kpi-cisa">--</span>
+                            </div>
+                            <div class="kpi-sub">Official 15-Day In-The-Wild Mandates</div>
+                        </div>
+                        <div class="kpi-card card-amber">
+                            <div class="kpi-icon">⚡</div>
+                            <div class="kpi-info">
+                                <span class="kpi-label">Correlated Danger (Both)</span>
+                                <span class="kpi-value" id="osint-kpi-correlated">--</span>
+                            </div>
+                            <div class="kpi-sub">On CISA KEV + High Social Chatter</div>
+                        </div>
+                        <div class="kpi-card card-cyan" style="border-color: rgba(168, 85, 247, 0.4);">
+                            <div class="kpi-icon">🕵️</div>
+                            <div class="kpi-info">
+                                <span class="kpi-label">Dark Web & Early Alerts</span>
+                                <span class="kpi-value" id="osint-kpi-darkweb">--</span>
+                            </div>
+                            <div class="kpi-sub">Underground Dorks, Pastes & Leaks</div>
+                        </div>
+                    </div>
+
+                    <!-- COMPARATIVE ANALYTICS: CISA KEV VS OSINT CHATTER (BAR CHART) -->
+                    <div class="panel" style="margin-bottom: 24px;">
+                        <div class="panel-header" style="flex-wrap: wrap; gap: 10px;">
+                            <div>
+                                <h4 style="font-size: 15px; display: flex; align-items: center; gap: 8px;">
+                                    <span>📊</span> Official CISA KEV Confirmed vs. Community & Dark Web OSINT Velocity
+                                </h4>
+                                <p style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+                                    Correlating government-confirmed in-the-wild exploitation against real-time social buzz, technical journalism, and underground leak dorks over the last 15 days.
+                                </p>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                <span class="badge" style="background: rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4);" id="badge-corr-both">🟣 Correlated: 0</span>
+                                <span class="badge" style="background: rgba(6,182,212,0.2); color:#38bdf8; border:1px solid rgba(6,182,212,0.4);" id="badge-osint-only">🔵 OSINT Only: 0</span>
+                                <span class="badge" style="background: rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4);" id="badge-cisa-only">🔴 CISA Only: 0</span>
+                                <button class="btn btn-xs btn-outline" onclick="loadOsintData()">🔄 Refresh</button>
+                            </div>
+                        </div>
+                        <div class="panel-body" style="position: relative; min-height: 280px; padding: 14px 16px;">
+                            <div style="width: 100%; height: 260px; position: relative;">
+                                <canvas id="osint-comparative-chart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- VISUAL ANALYTICS DECK (DONUT & CLUSTER CHARTS) -->
+                    <div class="osint-charts-layout" style="display: grid; grid-template-columns: 1fr 1.6fr; gap: 20px; margin-bottom: 24px;">
+                        <!-- PIE / DONUT CHART (6 PLATFORMS) -->
+                        <div class="panel" style="margin-bottom:0;">
+                            <div class="panel-header">
+                                <h4 style="font-size: 14px; display: flex; align-items: center; gap: 8px;">
+                                    <span>🥧</span> Threat Intelligence Share by Stream
+                                </h4>
+                                <span class="badge badge-cyan" id="osint-pie-total-badge">15-Day Mix</span>
+                            </div>
+                            <div class="panel-body" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 280px; position: relative;">
+                                <div style="width: 100%; max-width: 280px; height: 220px; position: relative;">
+                                    <canvas id="osint-pie-chart"></canvas>
+                                </div>
+                                <div id="osint-pie-legend" class="osint-chart-legend" style="display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 10px; font-size: 11px;"></div>
+                            </div>
+                        </div>
+
+                        <!-- CLUSTER / BUBBLE GRAPH -->
+                        <div class="panel" style="margin-bottom:0;">
+                            <div class="panel-header">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <h4 style="font-size: 14px; display: flex; align-items: center; gap: 8px;">
+                                        <span>🌌</span> Threat Velocity vs. Severity Cluster
+                                    </h4>
+                                    <span style="font-size: 11px; color: var(--text-muted);">(X: CVSS Score, Y: Mentions, Bubble: EPSS Weight)</span>
+                                </div>
+                            </div>
+                            <div class="panel-body" style="position: relative; min-height: 280px;">
+                                <div style="width: 100%; height: 260px; position: relative;">
+                                    <canvas id="osint-cluster-chart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- LIVE HARVESTED CARDS LEADERBOARD -->
+                    <div class="panel">
+                        <div class="panel-header" style="flex-wrap: wrap; gap: 12px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <h3>📡 15-Day Unified Threat Radar</h3>
+                                <span class="badge badge-emerald" id="osint-status-badge">6 Streams Active (15D Window)</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="btn btn-primary btn-sm btn-glow" onclick="runPresetScan('osint')">
+                                    <span>🔥 Trigger 15-Day Multi-Hunt</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <!-- CORRELATION OVERLAP FILTER PILLS -->
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;">
+                                <span style="font-size: 12px; color: var(--text-muted); align-self: center; margin-right: 4px;">Triage Filter:</span>
+                                <button class="osint-filter-pill active" data-filter="all" onclick="filterOsintByCorrelation('all')">
+                                    🔘 All Threats <span class="pill-badge" id="filter-cnt-all">0</span>
+                                </button>
+                                <button class="osint-filter-pill" data-filter="correlated" onclick="filterOsintByCorrelation('correlated')">
+                                    🟣 Correlated (CISA + OSINT) <span class="pill-badge" id="filter-cnt-corr">0</span>
+                                </button>
+                                <button class="osint-filter-pill" data-filter="osint_only" onclick="filterOsintByCorrelation('osint_only')">
+                                    🔵 OSINT Early Warnings <span class="pill-badge" id="filter-cnt-early">0</span>
+                                </button>
+                                <button class="osint-filter-pill" data-filter="cisa_only" onclick="filterOsintByCorrelation('cisa_only')">
+                                    🔴 CISA Confirmed Only <span class="pill-badge" id="filter-cnt-cisaonly">0</span>
+                                </button>
+                            </div>
+
+                            <!-- PLATFORM FILTER PILLS (6 PLATFORMS) -->
+                            <div class="osint-filter-strip">
+                                <span style="font-size: 12px; color: var(--text-muted); align-self: center; margin-right: 4px;">Platform Source:</span>
+                                <button class="osint-filter-pill active" data-platform="all" onclick="filterOsintCards('all')">
+                                    🔘 All Sources
+                                </button>
+                                <button class="osint-filter-pill" data-platform="CISA KEV" onclick="filterOsintCards('CISA KEV')">
+                                    🛡️ CISA KEV <span class="pill-badge" id="filter-cnt-cisa">0</span>
+                                </button>
+                                <button class="osint-filter-pill" data-platform="HackerNews" onclick="filterOsintCards('HackerNews')">
+                                    🟠 HackerNews <span class="pill-badge" id="filter-cnt-hn">0</span>
+                                </button>
+                                <button class="osint-filter-pill" data-platform="Reddit" onclick="filterOsintCards('Reddit')">
+                                    🔴 Reddit Security <span class="pill-badge" id="filter-cnt-reddit">0</span>
+                                </button>
+                                <button class="osint-filter-pill" data-platform="X (Twitter)" onclick="filterOsintCards('X (Twitter)')">
+                                    🔵 𝕏 (Twitter) <span class="pill-badge" id="filter-cnt-x">0</span>
+                                </button>
+                                <button class="osint-filter-pill" data-platform="Security Media" onclick="filterOsintCards('Security Media')">
+                                    📰 Media <span class="pill-badge" id="filter-cnt-media">0</span>
+                                </button>
+                                <button class="osint-filter-pill" data-platform="Dark Web & Underground" onclick="filterOsintCards('Dark Web & Underground')">
+                                    🕵️ Dark Web / Dorks <span class="pill-badge" id="filter-cnt-darkweb">0</span>
+                                </button>
+                                <button class="osint-filter-pill" data-platform="Telegram Threat Radar" onclick="filterOsintCards('Telegram Threat Radar')">
+                                    ✈️ Telegram <span class="pill-badge" id="filter-cnt-telegram">0</span>
+                                </button>
+                            </div>
+
+                            <div class="osint-grid" id="osint-cards-container" style="margin-top: 16px;">
+                                <div class="loading-spinner">Loading 15-day multi-stream intelligence...</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ======================================================== -->
+                <!-- 5. IOT / OT VIEW -->
+                <!-- ======================================================== -->
+                <section id="view-iot-ot" class="app-view">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h3>🏭 Critical Infrastructure & IoT / OT Watch</h3>
+                            <button class="btn btn-primary btn-sm" onclick="runPresetScan('iotot')">🏭 Run Hardware Sweep</button>
+                        </div>
+                        <div class="panel-body">
+                            <p class="text-muted">Targeted intelligence tracking SCADA, PLC, ICS, and Firmware vulnerabilities across industrial networks.</p>
+                            <div class="table-container">
+                                <table class="cyber-table">
+                                    <thead>
+                                        <tr>
+                                            <th>CVE ID</th>
+                                            <th>Severity</th>
+                                            <th>Vendor & Product</th>
+                                            <th>AI Summary</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="iot-table-body">
+                                        <tr><td colspan="5" class="text-center">Loading IoT/OT vulnerabilities...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ======================================================== -->
+                <!-- 6. REPORTS & EXPORTS VIEW -->
+                <!-- ======================================================== -->
+                <section id="view-reports" class="app-view">
+                    <div class="reports-layout">
+                        <!-- TOP ACTION & TELEMETRY PANEL -->
+                        <div class="panel" style="margin-bottom: 0;">
+                            <div class="reports-toolbar-panel">
+                                <div>
+                                    <h3 style="display: flex; align-items: center; gap: 8px; font-size: 16px;">
+                                        <span>📑</span> Executive Threat Intelligence Dossier & Reports
+                                    </h3>
+                                    <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap;">
+                                        <span class="badge badge-ai" id="rep-kpi-analyzed">⚡ -- Analyzed</span>
+                                        <span class="badge badge-crimson" id="rep-kpi-crit">🔴 -- Critical</span>
+                                        <span class="badge badge-cisa" id="rep-kpi-cisa">🛡️ -- CISA KEV</span>
+                                        <span class="badge badge-poc" id="rep-kpi-poc">🔥 -- PoCs</span>
+                                        <span id="report-last-sync" style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">Telemetry Live</span>
+                                    </div>
+                                </div>
+
+                                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                    <div style="display: flex; align-items: center; gap: 6px;">
+                                        <label for="report-scope-select" style="font-size: 12px; color: var(--text-muted);">Scope:</label>
+                                        <select id="report-scope-select" class="cyber-select" onchange="onReportScopeChange()" style="font-size: 12px; height: 32px;">
+                                            <option value="analyzed">⚡ All System Analyzed Threats (Default)</option>
+                                            <option value="date_range">📅 Date Range Pipeline</option>
+                                        </select>
+                                    </div>
+
+                                    <button class="btn btn-primary btn-sm btn-glow" id="btn-refresh-report" onclick="refreshHtmlReport()">
+                                        <span>🔄 Regenerate Live Report</span>
+                                    </button>
+                                    <a href="/api/reports/html?scope=analyzed" id="btn-open-report-tab" target="_blank" class="btn btn-outline btn-sm">
+                                        <span>👁️ Full Tab</span>
+                                    </a>
+                                    <button class="btn btn-outline btn-sm" onclick="downloadHtmlReport()">
+                                        <span>📥 Download HTML</span>
+                                    </button>
+
+                                    <!-- MODULAR PDF EXPORT -->
+                                    <div style="display: flex; align-items: center; gap: 6px; border-left: 1px solid var(--border-color); padding-left: 10px;">
+                                        <select id="pdf-export-type" class="cyber-select" style="font-size: 12px; height: 32px;">
+                                            <option value="report">🛡️ Threat Dossier PDF</option>
+                                            <option value="full">📦 Full Project PDF</option>
+                                            <option value="docs">📖 Architecture Docs</option>
+                                            <option value="code">💻 Python Code</option>
+                                            <option value="logs">📜 Logs</option>
+                                        </select>
+                                        <button class="btn btn-outline btn-sm" id="btn-export-pdf" onclick="exportPdf()">
+                                            <span>📥 Export PDF</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- FULL-WIDTH LIVE PREVIEW PANEL -->
+                        <div class="panel" style="margin-bottom: 0;">
+                            <div class="panel-header" style="padding: 10px 18px;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <h4 style="font-size: 14px; display: flex; align-items: center; gap: 8px;">
+                                        <span>📊</span> Live Threat Intelligence Briefing Preview
+                                    </h4>
+                                    <span class="badge badge-emerald" id="report-sync-status">System Telemetry Live</span>
+                                </div>
+                                <span style="font-size: 11px; color: var(--text-muted);">Fully interactive: search, filter chips, copyable PoC payloads & IoC pills</span>
+                            </div>
+                            <div class="panel-body" style="padding: 0; position: relative;">
+                                <div id="report-loading-overlay" class="report-loading-overlay" style="display: none;">
+                                    <div class="loading-spinner">Regenerating live report from analyzed system records...</div>
+                                </div>
+                                <iframe id="html-report-frame" src="/api/reports/html?scope=analyzed" class="report-iframe"></iframe>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ======================================================== -->
+                <!-- 7. SYSTEM & LLM GATEWAY VIEW -->
+                <!-- ======================================================== -->
+                <section id="view-system" class="app-view">
+                    <div class="system-layout">
+                        <div class="panel">
+                            <div class="panel-header">
+                                <h3>⚙️ System Gateway & API Health</h3>
+                            </div>
+                            <div class="panel-body" id="system-info-container">
+                                <div class="loading-spinner">Loading system status...</div>
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <div class="panel-header">
+                                <h3>📜 Operational Log Streamer</h3>
+                                <div class="log-tabs">
+                                    <button class="btn btn-xs btn-outline active" onclick="loadLog('analyzer')">cve_analyzer.log</button>
+                                    <button class="btn btn-xs btn-outline" onclick="loadLog('apicall')">apicall.log</button>
+                                    <button class="btn btn-xs btn-outline" onclick="loadLog('exploit')">exploitfinder.log</button>
+                                </div>
+                            </div>
+                            <div class="panel-body">
+                                <pre class="log-viewer" id="log-content-box">Loading logs...</pre>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ======================================================== -->
+                <!-- 8. OWNED ASSETS INVENTORY (CORRELATION ENGINE) -->
+                <!-- ======================================================== -->
+                <section id="view-assets" class="app-view">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div>
+                                <h3 style="display: flex; align-items: center; gap: 8px;">
+                                    🏢 Internal Owned Assets Inventory
+                                    <span style="font-size: 11px; font-weight: 600; background: rgba(245, 158, 11, 0.2); color: #f59e0b; padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(245, 158, 11, 0.4);">
+                                        Threat Correlation V2.1 [Under Development]
+                                    </span>
+                                </h3>
+                                <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0;">
+                                    Register enterprise infrastructure, software, OT controllers, and exposed endpoints. The platform will automatically correlate incoming CVEs, zero-days, and weaponized exploit modules against this inventory.
+                                </p>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="btn btn-primary btn-sm" onclick="openAddAssetModal()">
+                                    ➕ Register New Asset
+                                </button>
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="filter-group" style="margin-bottom: 16px;">
+                                <input type="text" id="asset-search-input" class="cyber-input" placeholder="Filter assets by name, vendor, product, or IP..." oninput="filterAssetsTable()">
+                            </div>
+                            <div class="table-container">
+                                <table class="cyber-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Asset Name</th>
+                                            <th>Type</th>
+                                            <th>Vendor</th>
+                                            <th>Product</th>
+                                            <th>Version / CPE</th>
+                                            <th>IP / Domain</th>
+                                            <th>Criticality</th>
+                                            <th>Threat Matches</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="assets-table-body">
+                                        <tr><td colspan="9" class="text-center">Loading registered assets...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- CVE DEEP-DIVE & POC LAB MODAL -->
+    <!-- ======================================================== -->
+    <div class="modal-overlay hidden" id="cve-modal">
+        <div class="modal-card modal-dossier-card">
+            <div class="modal-header cve-dossier-header">
+                <div class="cve-header-left">
+                    <div class="cve-id-title-box">
+                        <h2 id="modal-cve-id">CVE-XXXX-YYYY</h2>
+                        <button class="btn-copy-id" id="btn-copy-modal-cve-id" onclick="copyModalCveId(this)" title="Copy CVE ID">📋 Copy</button>
+                    </div>
+                    <div id="modal-badges-container" class="cve-header-badges"></div>
+                </div>
+                <div class="cve-header-actions" id="modal-header-actions">
+                    <button class="btn btn-xs btn-primary" id="modal-reanalyze-btn" onclick="triggerAnalyzeFromModal()" title="Re-Analyze with AI">⚡ Re-Analyze</button>
+                    <a id="modal-export-csv" href="#" target="_blank" class="btn btn-xs btn-outline" style="text-decoration:none;" title="Export IoCs CSV">📥 CSV</a>
+                    <a id="modal-export-stix" href="#" target="_blank" class="btn btn-xs btn-outline" style="text-decoration:none;" title="Export IoCs STIX 2.1">📥 STIX</a>
+                    <button class="btn-close-modal" id="btn-close-modal" onclick="closeCveModal()" title="Close details panel (Esc)">✕</button>
+                </div>
+            </div>
+            <div class="modal-body cve-dossier-body" id="modal-content-body">
+                <div class="loading-spinner">Loading deep intelligence...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- CISA DATABASE TECHNICAL ENRICHMENT MODAL -->
+    <!-- ======================================================== -->
+    <div class="modal-overlay hidden" id="cisa-enrich-modal">
+        <div class="modal-card" style="max-width: 540px;">
+            <div class="modal-header">
+                <div class="modal-title-box">
+                    <h2 style="font-size: 18px; color: var(--accent-cyan); display: flex; align-items: center; gap: 8px;">
+                        ⚡ Enrich DB with CISA Analysis
+                    </h2>
+                    <div class="modal-badges">
+                        <span class="badge badge-emerald" style="font-size: 11px;">NIST NVD 2.0 & EPSS Ingestion</span>
+                    </div>
+                </div>
+                <button class="btn-close-modal" onclick="closeCisaEnrichModal()" title="Close dialog (Esc)">✕</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <div style="background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.25); border-radius: 8px; padding: 14px; margin-bottom: 18px; font-size: 13px; line-height: 1.5; color: var(--text-secondary);">
+                    <strong style="color: var(--accent-cyan);">Technical Enrichment Mode:</strong><br>
+                    Syncs official CISA KEV entries into the local database and fills out complete technical details by fetching from <strong>NIST NVD 2.0</strong> (CVSS score, vector, CWE, vendor/product, reference links) and <strong>FIRST.org EPSS</strong>.<br>
+                    <span style="color: var(--accent-emerald); font-weight: 600; display: inline-block; margin-top: 6px;">✓ Zero AI Tokens Consumed:</span> No LLM API calls are made during this enrichment. AI analysis is reserved for targeted threat hunts.
+                </div>
+
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 8px;">
+                        Select Severity Filter Scope:
+                    </label>
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <label class="cyber-radio-card active" id="label-scope-medium" style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--accent-cyan); background: rgba(6, 182, 212, 0.08); border-radius: 6px; cursor: pointer; transition: all 0.2s ease;">
+                            <input type="radio" name="cisa_severity_scope" value="medium_plus" checked onchange="updateCisaModalUI()" style="margin-top: 3px;">
+                            <div>
+                                <strong style="color: var(--accent-cyan); font-size: 13px;">Medium+ Severity CVEs Only</strong>
+                                <p style="margin: 2px 0 0; font-size: 12px; color: var(--text-muted);">Enriches Critical, High, and Medium CVEs (CVSS ≥ 4.0 or new unscored listings). [Recommended]</p>
+                            </div>
+                        </label>
+                        <label class="cyber-radio-card" id="label-scope-all" style="display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--border-color); background: var(--bg-surface); border-radius: 6px; cursor: pointer; transition: all 0.2s ease;">
+                            <input type="radio" name="cisa_severity_scope" value="all" onchange="updateCisaModalUI()" style="margin-top: 3px;">
+                            <div>
+                                <strong style="color: var(--text-main); font-size: 13px;">All Severity CVEs</strong>
+                                <p style="margin: 2px 0 0; font-size: 12px; color: var(--text-muted);">Enriches all CISA catalog entries regardless of CVSS severity (including Low).</p>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 8px;">
+                        Timeframe Scope:
+                    </label>
+                    <select id="cisa-enrich-timeframe" class="cyber-select" style="width: 100%;">
+                        <option value="this_month">Published in CISA This Month / Last 30 Days (Prioritized)</option>
+                        <option value="all">Entire CISA Catalog in Database (All-Time Historical)</option>
+                    </select>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+                    <button class="btn btn-secondary btn-sm" onclick="closeCisaEnrichModal()">Cancel</button>
+                    <button class="btn btn-primary btn-sm" id="btn-start-cisa-enrich" onclick="startCisaEnrichment()">
+                        ⚡ Start Technical Enrichment
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- ASSET REGISTRATION MODAL -->
+    <!-- ======================================================== -->
+    <div class="modal-overlay hidden" id="add-asset-modal">
+        <div class="modal-card" style="max-width: 560px;">
+            <div class="modal-header">
+                <div class="modal-title-box">
+                    <h2 style="font-size: 18px; color: var(--accent-cyan); display: flex; align-items: center; gap: 8px;">
+                        🏢 Register Owned Asset
+                    </h2>
+                    <div class="modal-badges">
+                        <span class="badge badge-amber" style="font-size: 11px;">Threat Correlation Target</span>
+                    </div>
+                </div>
+                <button class="btn-close-modal" onclick="closeAddAssetModal()" title="Close dialog (Esc)">✕</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <form id="asset-form" onsubmit="submitNewAsset(event)">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                        <div>
+                            <label style="display:block; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">Asset Name *</label>
+                            <input type="text" id="asset-in-name" class="cyber-input" placeholder="e.g. Core DMZ Gateway" required style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="display:block; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">Asset Type *</label>
+                            <select id="asset-in-type" class="cyber-select" style="width: 100%;">
+                                <option value="Server">Server / VM</option>
+                                <option value="Firewall">Firewall / Gateway</option>
+                                <option value="PLC">PLC / SCADA / OT</option>
+                                <option value="Database">Database</option>
+                                <option value="Web App">Web Application</option>
+                                <option value="Workstation">Workstation</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                        <div>
+                            <label style="display:block; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">Vendor *</label>
+                            <input type="text" id="asset-in-vendor" class="cyber-input" placeholder="e.g. Fortinet, Cisco, Siemens" required style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="display:block; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">Product *</label>
+                            <input type="text" id="asset-in-product" class="cyber-input" placeholder="e.g. FortiOS, ASA, S7-1500" required style="width: 100%;">
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                        <div>
+                            <label style="display:block; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">Software Version</label>
+                            <input type="text" id="asset-in-version" class="cyber-input" placeholder="e.g. 7.2.4" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="display:block; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">CPE 2.3 Identifier</label>
+                            <input type="text" id="asset-in-cpe" class="cyber-input" placeholder="cpe:2.3:o:fortinet:fortios:7.2.4:..." style="width: 100%;">
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                        <div>
+                            <label style="display:block; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">IP Address</label>
+                            <input type="text" id="asset-in-ip" class="cyber-input" placeholder="e.g. 192.168.1.1" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="display:block; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">Criticality Level</label>
+                            <select id="asset-in-crit" class="cyber-select" style="width: 100%;">
+                                <option value="Critical">Critical (Mission Critical)</option>
+                                <option value="High" selected>High</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Low">Low</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 16px;">
+                        <label style="display:block; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">Internal Notes</label>
+                        <textarea id="asset-in-notes" class="cyber-input" rows="2" placeholder="Owner contact, maintenance window, network segment..." style="width: 100%; font-family: inherit;"></textarea>
+                    </div>
+
+                    <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="closeAddAssetModal()">Cancel</button>
+                        <button type="submit" class="btn btn-primary btn-sm">💾 Save Asset</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- CHART.JS FOR OSINT RADAR VISUAL ANALYTICS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/static/app.js?v=2.9"></script>
+</body>
+</html>

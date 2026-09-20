@@ -1,0 +1,125 @@
+# ==============================================================================
+# Git Ignore Configuration - Automated Threat Intelligence (ATI V2)
+# Strictly tracks pure code, documentation, configuration templates, and UI assets.
+# Excludes secrets, runtime caches, SQLite databases, logs, and artifacts.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Secrets & Environment Variables (CRITICAL)
+# ------------------------------------------------------------------------------
+.env
+.env*
+.env.*
+*.env
+# Ensure template is tracked
+!.env.example
+
+# Private Keys & Certificates
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+
+# ------------------------------------------------------------------------------
+# 2. SQLite & Database Storage (Runtime State)
+# ------------------------------------------------------------------------------
+# Database files must not be tracked (prevents repo bloat and data leakage)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+data/*.db
+data/*.sqlite
+threat_intel.db
+
+# Whitelist essential lookup text files in data/
+!data/known_advisory_links_url.txt
+!data/known_exploit_links_url.txt
+
+# ------------------------------------------------------------------------------
+# 3. Operational Logs & Scratch Buffers
+# ------------------------------------------------------------------------------
+logs/
+*.log
+execution_temp/
+scratch/
+temp/
+tmp/
+
+# ------------------------------------------------------------------------------
+# 4. Generated Reports & Output Artifacts
+# ------------------------------------------------------------------------------
+report_output.html
+ATI_Threat_Dossier_*.pdf
+*.pdf
+exports/
+output/
+
+# ------------------------------------------------------------------------------
+# 5. Python Bytecode, Caches & Builds
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & Type Checking
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ------------------------------------------------------------------------------
+# 6. Virtual Environments
+# ------------------------------------------------------------------------------
+venv/
+.venv/
+env/
+.env_*/
+ENV/
+env.bak/
+venv.bak/
+
+# ------------------------------------------------------------------------------
+# 7. IDE, Editor & OS Junk
+# ------------------------------------------------------------------------------
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# JetBrains (PyCharm)
+.idea/
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
