@@ -148,11 +148,11 @@ def _call_llm_chat(messages, max_tokens=1000, temperature=0.1, custom_models=Non
     6. Local Ollama (100% offline fallback)
     """
     providers_order = [
-        ("groq", get_groq_keys(), "https://api.groq.com/openai/v1", GROQ_MODELS, 15.0),
-        ("cerebras", get_cerebras_keys(), "https://api.cerebras.ai/v1", CEREBRAS_MODELS, 15.0),
-        ("openrouter", get_openrouter_keys(), "https://openrouter.ai/api/v1", OPENROUTER_MODELS, 20.0),
-        ("gemini", get_gemini_keys(), "https://generativelanguage.googleapis.com/v1beta/openai/", GEMINI_MODELS, 20.0),
-        ("mistral", get_mistral_keys(), "https://api.mistral.ai/v1", MISTRAL_MODELS, 20.0)
+        ("groq", get_groq_keys(), "https://api.groq.com/openai/v1", GROQ_MODELS, 12.0),
+        ("gemini", get_gemini_keys(), "https://generativelanguage.googleapis.com/v1beta/openai/", GEMINI_MODELS, 18.0),
+        ("mistral", get_mistral_keys(), "https://api.mistral.ai/v1", MISTRAL_MODELS, 12.0),
+        ("cerebras", get_cerebras_keys(), "https://api.cerebras.ai/v1", CEREBRAS_MODELS, 6.0),
+        ("openrouter", get_openrouter_keys(), "https://openrouter.ai/api/v1", OPENROUTER_MODELS, 10.0)
     ]
 
     for p_name, keys, base_url, default_models, timeout_sec in providers_order:
@@ -173,7 +173,7 @@ def _call_llm_chat(messages, max_tokens=1000, temperature=0.1, custom_models=Non
                 t_start = time.time()
 
                 try:
-                    client = OpenAI(base_url=base_url, api_key=key, timeout=timeout_sec)
+                    client = OpenAI(base_url=base_url, api_key=key, timeout=timeout_sec, max_retries=0)
                     response = client.chat.completions.create(
                         model=model,
                         messages=messages,
@@ -196,11 +196,17 @@ def _call_llm_chat(messages, max_tokens=1000, temperature=0.1, custom_models=Non
                     _record_telemetry(p_name, False, latency, model)
                     err_str = str(e)
 
-                    # Dynamic key cooldown on rate limit (429) or quota exhaustion
-                    if "429" in err_str or "rate limit" in err_str.lower() or "free-models-per-day" in err_str:
+                    # Dynamic key cooldown on rate limit (429), payment required (402), or quota exhaustion
+                    if "402" in err_str or "payment" in err_str.lower() or "billing" in err_str.lower():
+                        _set_cooldown(key, 86400.0)
+                        logger.warning(f"{req_tag} -> Payment required / quota exhausted (402). Placing key in cooldown for 24h.")
+                    elif "429" in err_str or "rate limit" in err_str.lower() or "free-models-per-day" in err_str:
                         cooldown_time = 86400.0 if "free-models-per-day" in err_str else 60.0
                         _set_cooldown(key, cooldown_time)
                         logger.warning(f"{req_tag} -> Rate limit triggered. Placing key in cooldown for {cooldown_time}s.")
+                    elif "timeout" in err_str.lower() or "timed out" in err_str.lower():
+                        if p_name == "openrouter":
+                            _set_cooldown(key, 300.0)
 
                     err_snippet = err_str[:160].replace("\n", " ")
                     fail_msg = f"{req_tag} -> FAILED in {latency:.2f}s: {err_snippet}"
@@ -245,8 +251,17 @@ def ai_link_classifier(text_content, url=None, thread_models=None):
     """
     from backend import scraper
 
-    # Heuristic Rule 1: Exploit link signature or runnable command match
-    if (url and scraper.is_known_exploit_url(url)) or scraper.match_exploit_command_signatures(text_content):
+    # Heuristic Rule 0: Product version / release tag check
+    if url and scraper.is_product_release_url(url):
+        return "VULN_VERSION"
+
+    # Heuristic Rule 1: Research Blog with embedded PoC or pure PoC
+    is_blog = bool(url and scraper.is_blog_url(url, text_content))
+    has_poc_command = bool(scraper.match_exploit_command_signatures(text_content) or (url and scraper.is_known_exploit_url(url)))
+
+    if is_blog and has_poc_command:
+        return "BLOG_POC"
+    if has_poc_command:
         return "POC"
 
     # Heuristic Rule 2: Official vendor security bulletin match
@@ -256,6 +271,8 @@ def ai_link_classifier(text_content, url=None, thread_models=None):
     # Heuristic Rule 3: GitHub smart path inspection
     if url and "github.com" in url.lower():
         u_lower = url.lower()
+        if any(p in u_lower for p in ["/releases/tag/", "/releases/download/", "/archive/refs/tags/", "/releases", "/tags"]):
+            return "VULN_VERSION"
         if "/commit/" in u_lower or "/pull/" in u_lower or "/security/advisories/" in u_lower:
             return "VENDOR_FIX"
         if any(u_lower.endswith(ext) for ext in [".py", ".c", ".cpp", ".go", ".sh", ".rb", ".pl"]):
@@ -263,16 +280,22 @@ def ai_link_classifier(text_content, url=None, thread_models=None):
         if "/issues/" in u_lower:
             return "INFO"
 
+    if is_blog:
+        return "BLOG"
+
     if not text_content or len(text_content.strip()) < 25:
         return "INFO"
 
     # Fast AI fallback for ambiguous text
     prompt = """You are an expert threat intelligence classifier. Read the text extracted from a security webpage.
-Classify this content into EXACTLY one of these three categories:
+Classify this content into EXACTLY one of these categories:
 1. 'POC' - Working Proof of Concept code, exploit payload, or weaponization steps.
-2. 'VENDOR_FIX' - Official vendor security advisory, patch notification, or mitigation guide.
-3. 'INFO' - General CVE discussion, news blog, or bug tracker without runnable exploit.
-Output EXACTLY and ONLY one word: 'POC', 'VENDOR_FIX', or 'INFO'."""
+2. 'BLOG_POC' - Security research writeup or blog containing working PoC commands or code.
+3. 'BLOG' - General security research writeup or article without runnable exploit commands.
+4. 'VULN_VERSION' - Product version release, download archive, or package distribution.
+5. 'VENDOR_FIX' - Official vendor security advisory, patch notification, or mitigation guide.
+6. 'INFO' - General CVE discussion, news snippet, or bug tracker.
+Output EXACTLY and ONLY one word: 'POC', 'BLOG_POC', 'BLOG', 'VULN_VERSION', 'VENDOR_FIX', or 'INFO'."""
 
     truncated_text = text_content[:4000]
     messages = [
@@ -280,11 +303,17 @@ Output EXACTLY and ONLY one word: 'POC', 'VENDOR_FIX', or 'INFO'."""
         {"role": "user", "content": f"Text:\n{truncated_text}"}
     ]
 
-    reply, model_used = _call_llm_chat(messages, max_tokens=10, temperature=0.0, custom_models=thread_models)
+    reply, model_used = _call_llm_chat(messages, max_tokens=15, temperature=0.0, custom_models=thread_models)
     if reply:
         clean = reply.strip().upper()
-        if "POC" in clean:
+        if "BLOG_POC" in clean or ("BLOG" in clean and "POC" in clean):
+            return "BLOG_POC"
+        elif "POC" in clean:
             return "POC"
+        elif "BLOG" in clean:
+            return "BLOG"
+        elif "VERSION" in clean or "RELEASE" in clean:
+            return "VULN_VERSION"
         elif "VENDOR" in clean or "FIX" in clean or "PATCH" in clean:
             return "VENDOR_FIX"
         else:
@@ -295,6 +324,64 @@ Output EXACTLY and ONLY one word: 'POC', 'VENDOR_FIX', or 'INFO'."""
 def ai_poc_detector(text_content, url=None, thread_models=None):
     """Backwards-compatible wrapper: returns True if classified as POC."""
     return ai_link_classifier(text_content, url=url, thread_models=thread_models) == "POC"
+
+
+def ai_select_best_poc_links(cve_id: str, candidate_urls: list, max_select: int = 3, thread_models=None) -> list:
+    """
+    Given a list of 5+ outbound candidate URLs extracted from a page,
+    uses the LLM to identify the top candidate links most likely to contain
+    functional PoC exploit code, technical recreation steps, or raw scripts.
+    Falls back to heuristic ranking if LLM is unavailable.
+    """
+    if not candidate_urls:
+        return []
+    if len(candidate_urls) <= max_select:
+        return candidate_urls
+
+    def heuristic_score(u):
+        u_low = u.lower()
+        score = 0
+        if any(k in u_low for k in ['exploit', 'poc', 'payload', 'advisory/poc', 'cve-']): score += 10
+        if any(k in u_low for k in ['github.com', 'gitlab.com', 'gist.github.com']): score += 8
+        if any(u_low.endswith(ext) for ext in ['.py', '.sh', '.c', '.go', '.rb', '.pl']): score += 10
+        if any(k in u_low for k in ['raw.githubusercontent.com', 'pastebin.com', 'rentry.co']): score += 9
+        if any(k in u_low for k in ['/blog/', '/research/', '/writeup/', '/disclosures/']): score += 5
+        if any(k in u_low for k in ['support.', 'help.', 'docs.', 'forum.', 'community.', 'legal', 'privacy', 'twitter.com', 'linkedin.com']): score -= 10
+        return score
+
+    sorted_candidates = sorted(candidate_urls, key=heuristic_score, reverse=True)
+
+    prompt = f"""You are a cyber threat intelligence specialist analyzing {cve_id}.
+From the following candidate URLs extracted from a security disclosure, select up to {max_select} URLs that are MOST LIKELY to contain a Proof of Concept (PoC), weaponized exploit script, GitHub repository, or technical recreation steps.
+
+Candidate URLs:
+{chr(10).join(sorted_candidates[:15])}
+
+Output ONLY the selected URLs, exactly one URL per line, with no other commentary or markdown."""
+
+    messages = [
+        {"role": "system", "content": "You are a precise link selector for security exploit researchers. Select only the top URLs most likely to contain actual PoC exploit code or reproduction steps."},
+        {"role": "user", "content": prompt}
+    ]
+
+    try:
+        reply, model_used = _call_llm_chat(messages, max_tokens=150, temperature=0.0, custom_models=thread_models)
+        if reply and not reply.startswith("API Offline") and not model_used.startswith("Failed"):
+            chosen = []
+            for line in reply.splitlines():
+                line = line.strip().strip("-*• ")
+                for cand in candidate_urls:
+                    if cand in line or line in cand:
+                        if cand not in chosen:
+                            chosen.append(cand)
+                            break
+            if chosen:
+                logger.info(f"AI selected {len(chosen)} candidate PoC links for {cve_id} via {model_used}: {chosen}")
+                return chosen[:max_select]
+    except Exception as e:
+        logger.warning(f"AI link selection error for {cve_id}: {e}")
+
+    return sorted_candidates[:max_select]
 
 
 def analyze_individual_cve(cve_id, combined_text_data, thread_models=None):
@@ -367,6 +454,119 @@ def analyze_individual_cve(cve_id, combined_text_data, thread_models=None):
         (kw or "None"),
         model_used
     )
+
+
+def analyze_cve_batch(cve_items, thread_models=None):
+    """
+    High-throughput batch CVE analyzer: combines 2 to 4 CVEs into a single LLM request.
+    Reduces API calls by up to 75%, avoiding free-tier rate limits and accelerating pipeline execution.
+    cve_items: list of (cve_id, combined_text) tuples.
+    Returns: dict {cve_id: (summary, action, poc, vendor, product, keywords, model_used)}
+    """
+    if not cve_items:
+        return {}
+
+    if len(cve_items) == 1:
+        cid, txt = cve_items[0]
+        return {cid.strip().upper(): analyze_individual_cve(cid, txt, thread_models=thread_models)}
+
+    # Auto-chunk large batches into safe sub-batches of 3 to prevent token exhaustion
+    if len(cve_items) > 3:
+        import concurrent.futures
+        results = {}
+        sub_batches = [cve_items[i:i + 3] for i in range(0, len(cve_items), 3)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(sub_batches))) as executor:
+            futures = [executor.submit(analyze_cve_batch, sb, thread_models=thread_models) for sb in sub_batches]
+            for f in concurrent.futures.as_completed(futures):
+                try:
+                    results.update(f.result())
+                except Exception as e:
+                    logger.error(f"Error in batch sub-worker: {e}")
+        return results
+
+    cve_ids_str = ", ".join([cid for cid, _ in cve_items])
+    logger.info(f"AI Batch Analyzing {len(cve_items)} CVEs ({cve_ids_str}) in single prompt...")
+
+    batch_prompt = f"""You are a precise cybersecurity analyst. You MUST analyze EACH vulnerability in the provided list.
+For EACH vulnerability, output your response EXACTLY using the following XML structure:
+
+<cve id="CVE-ID">
+<summary>5 to 6 line summary of the threat.</summary>
+<action>1 line recommended action.</action>
+<poc>Exact PoC code, recreation steps, or malicious URLs. If none, write 'None'.</poc>
+<vendor>Vendor Name or 'Unknown'</vendor>
+<product>Product Name or 'Unknown'</product>
+<keywords>Comma-separated keywords from this exact list: {', '.join(KEYWORD_LIST)}</keywords>
+</cve>
+
+Do NOT add any conversational text outside these tags."""
+
+    user_payload = "\n\n" + ("=" * 40) + "\n\n"
+    user_payload = user_payload.join([f"=== Vulnerability: {cid} ===\n{(txt or '')[:2500]}" for cid, txt in cve_items])
+
+    messages = [
+        {"role": "system", "content": batch_prompt},
+        {"role": "user", "content": user_payload}
+    ]
+
+    tokens_budget = min(4000, 1000 * len(cve_items))
+    raw_text, model_used = _call_llm_chat(messages, max_tokens=tokens_budget, temperature=0.1, custom_models=thread_models)
+
+    results = {}
+    if not raw_text:
+        # Graceful non-blocking fallback if providers are rate-limited/offline
+        for cid, txt in cve_items:
+            clean_cid = cid.strip().upper()
+            results[clean_cid] = (
+                "Active threat telemetry indexed. Automatic deep AI analysis temporarily offline or rate-limited; full evidence preserved in database.",
+                "Review proof links and exploit reproduction steps in Sources tab.",
+                "None",
+                "Unknown",
+                "Unknown",
+                "In-The-Wild, OSINT",
+                model_used or "Failed (Rate Limited)"
+            )
+        return results
+
+    # Parse each <cve id="...">...</cve> block
+    cve_blocks = re.findall(r'<cve\s+id=[\'"]([^\'"]+)[\'"]>(.*?)</cve>', raw_text, flags=re.IGNORECASE | re.DOTALL)
+    parsed_ids = set()
+
+    for cid_match, block in cve_blocks:
+        clean_cid = cid_match.strip().upper()
+        parsed_ids.add(clean_cid)
+
+        def extract_tag(text, tag):
+            m = re.search(rf'<{tag}>(.*?)</{tag}>', text, flags=re.IGNORECASE | re.DOTALL)
+            return m.group(1).strip() if m else None
+
+        s = extract_tag(block, 'summary')
+        a = extract_tag(block, 'action')
+        p = extract_tag(block, 'poc')
+        v = extract_tag(block, 'vendor')
+        pr = extract_tag(block, 'product')
+        kw = extract_tag(block, 'keywords')
+
+        if p:
+            p = p.replace('```html', '').replace('```python', '').replace('```', '').strip()
+
+        results[clean_cid] = (
+            s or "Analysis details extracted from threat feeds.",
+            a or "Review manually and apply vendor patches.",
+            p or "None",
+            v or "Unknown",
+            pr or "Unknown",
+            kw or "None",
+            model_used
+        )
+
+    # Any CVE in the batch that failed to parse individually falls back to analyze_individual_cve
+    for cid, txt in cve_items:
+        clean_cid = cid.strip().upper()
+        if clean_cid not in parsed_ids:
+            results[clean_cid] = analyze_individual_cve(cid, txt, thread_models=thread_models)
+
+    return results
 
 
 def generate_priority_summary(cve_summaries_list):

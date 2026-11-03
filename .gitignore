@@ -36,9 +36,11 @@ data/*.db
 data/*.sqlite
 threat_intel.db
 
-# Whitelist essential lookup text files in data/
+# Whitelist essential lookup text and config files in data/
+data/*_cache.json
 !data/known_advisory_links_url.txt
 !data/known_exploit_links_url.txt
+!data/software_archive_sources.json
 
 # ------------------------------------------------------------------------------
 # 3. Operational Logs & Scratch Buffers
@@ -58,6 +60,8 @@ ATI_Threat_Dossier_*.pdf
 *.pdf
 exports/
 output/
+conference/
+
 
 # ------------------------------------------------------------------------------
 # 5. Python Bytecode, Caches & Builds

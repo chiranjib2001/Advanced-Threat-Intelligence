@@ -1,0 +1,60 @@
+{
+  "description": "Curated directory of software release repositories, package registries, and historical archives used by ATI V2 to locate vulnerable software versions for security research and lab reproduction.",
+  "version": "1.0",
+  "archive_repositories": [
+    {
+      "name": "Wayback Machine (Internet Archive CDX)",
+      "type": "web_archive",
+      "cdx_api_url": "https://web.archive.org/cdx/search/cdx",
+      "replay_base_url": "https://web.archive.org/web/",
+      "notes": "Queries historical snapshots of download URLs and release pages"
+    },
+    {
+      "name": "GitHub Releases & Tags",
+      "type": "git_registry",
+      "api_releases": "https://api.github.com/repos/{owner}/{repo}/releases",
+      "api_tags": "https://api.github.com/repos/{owner}/{repo}/tags",
+      "release_url_template": "https://github.com/{owner}/{repo}/releases/tag/{tag}",
+      "archive_download_template": "https://github.com/{owner}/{repo}/archive/refs/tags/{tag}.zip"
+    },
+    {
+      "name": "Docker Hub / Container Registries",
+      "type": "container_registry",
+      "api_tags": "https://hub.docker.com/v2/repositories/{namespace}/{repository}/tags",
+      "pull_template": "docker pull {image}:{tag}"
+    },
+    {
+      "name": "PyPI (Python Package Index)",
+      "type": "package_registry",
+      "json_api": "https://pypi.org/pypi/{package}/json",
+      "version_url_template": "https://pypi.org/project/{package}/{version}/#files"
+    },
+    {
+      "name": "npm Registry",
+      "type": "package_registry",
+      "json_api": "https://registry.npmjs.org/{package}",
+      "version_url_template": "https://www.npmjs.com/package/{package}/v/{version}"
+    },
+    {
+      "name": "Maven Central",
+      "type": "package_registry",
+      "search_api": "https://search.maven.org/solrsearch/select?q=g:{group}+AND+a:{artifact}&core=gav&rows=20&wt=json",
+      "repo_download_template": "https://repo1.maven.org/maven2/{group_path}/{artifact}/{version}/{artifact}-{version}.jar"
+    },
+    {
+      "name": "Apache Software Foundation Archive",
+      "type": "mirror_archive",
+      "base_url": "https://archive.apache.org/dist/{product}/"
+    },
+    {
+      "name": "OldVersion.com",
+      "type": "legacy_archive",
+      "search_url": "http://www.oldversion.com/search?q={product}"
+    },
+    {
+      "name": "SourceForge Files",
+      "type": "open_source_archive",
+      "base_url": "https://sourceforge.net/projects/{project}/files/"
+    }
+  ]
+}

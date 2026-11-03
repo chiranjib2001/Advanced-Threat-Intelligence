@@ -70,9 +70,10 @@ security.archlinux.org
 suse.com/security/cve
 aws.amazon.com/security/security-bulletins
 cloud.google.com/security/bulletins
-oracle.com/security-alerts
 vmware.com/security/advisories
 broadcom.com/support/security-advisories
+docker.com/security
+docs.docker.com/security
 
 # Bug Trackers & Advisory Portals
 github.com/.*/security/advisories

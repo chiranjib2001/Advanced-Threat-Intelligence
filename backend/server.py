@@ -23,10 +23,18 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
+import warnings
 try:
-    from backend import db_manager, collect, iot_ot_cve, exploit_finder, osint_hunter, report, ioc_engine, llm, enrich_engine
+    from bs4 import XMLParsedAsHTMLWarning, MarkupResemblesLocatorWarning
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+    warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
 except ImportError:
-    from . import db_manager, collect, iot_ot_cve, exploit_finder, osint_hunter, report, ioc_engine, llm, enrich_engine
+    pass
+
+try:
+    from backend import db_manager, collect, iot_ot_cve, exploit_finder, osint_hunter, report, ioc_engine, llm, enrich_engine, vuln_version_finder, scraper
+except ImportError:
+    from . import db_manager, collect, iot_ot_cve, exploit_finder, osint_hunter, report, ioc_engine, llm, enrich_engine, vuln_version_finder, scraper
 
 STATIC_DIR = os.path.join(ROOT_DIR, "static")
 LOGS_DIR = os.path.join(ROOT_DIR, "logs")
@@ -176,13 +184,21 @@ def execute_pipeline_task(req: ScanRequest):
 
             if trending:
                 source_details = getattr(trending, "source_details", {})
-                for cve_id, count in trending.items():
+                trending_items = list(trending.items())
+                if effective_count:
+                    trending_items = trending_items[:effective_count]
+                for cve_id, count in trending_items:
+                    if getattr(main, "scan_stop_event", None) and main.scan_stop_event.is_set():
+                        print("[*] Scan pause/cancellation requested. Stopping OSINT processing.")
+                        break
+
                     collect.fetch_single_cve(cve_id)
                     records = source_details.get(cve_id, [])
                     platforms = list(set([r["platform"] for r in records]))
                     platforms_str = ", ".join(platforms) if platforms else "Social Chatter"
                     cursor.execute('UPDATE cve_main SET osint_mention_count = ?, is_exploited_in_wild = 1, osint_sources = ? WHERE cve_id = ?', (count, platforms_str, cve_id))
                     
+                    seed_links = set()
                     for rec in records:
                         cursor.execute('SELECT id FROM cve_sources WHERE cve_id = ? AND url = ?', (cve_id, rec["url"]))
                         if not cursor.fetchone():
@@ -197,6 +213,66 @@ def execute_pipeline_task(req: ScanRequest):
                                 f"{rec['title']} (Unverified Internet Chatter)",
                                 "unverified_osint_poc" if rec.get("is_poc") else "unverified_osint_chatter"
                             ))
+                        seed_links.add(rec["url"])
+                        # Extract any embedded links in title or snippet text
+                        text_to_scan = f"{rec.get('title', '')} {rec.get('snippet', '')}"
+                        for emb_url in scraper.extract_links_from_text(text_to_scan):
+                            seed_links.add(emb_url)
+
+                    # Also include Level 1 reference links from NIST (excluding known advisories & product releases)
+                    cursor.execute('SELECT url FROM cve_sources WHERE cve_id = ? AND url != ""', (cve_id,))
+                    for s_row in cursor.fetchall():
+                        u = s_row['url']
+                        if u and not scraper.is_known_advisory_url(u) and not scraper.is_product_release_url(u):
+                            seed_links.add(u)
+
+                    # Execute high-speed Level-2 parallel crawl with early PoC exit & AI link selection
+                    if seed_links:
+                        print(f"   [*] Rapid Crawling OSINT links for {cve_id} (Level 2 Fast Engine with PoC Early-Exit)...")
+                        chain_results = scraper.execute_chain_link_crawl(
+                            cve_id, list(seed_links), max_depth=2, max_workers=6, stop_on_poc=True, max_total_urls=15
+                        )
+                        for cr in chain_results:
+                            c_url = cr["url"]
+                            c_poc = cr["is_poc"]
+                            c_stat = cr["exploit_status"]
+                            c_text = cr.get("text", "")[:300]
+                            if c_stat == "blog_poc":
+                                s_name = "OSINT Research Blog (PoC)"
+                            elif c_stat == "poc":
+                                s_name = "OSINT Discovered PoC"
+                            elif c_stat == "blog":
+                                s_name = "OSINT Research Blog"
+                            elif c_stat == "vuln_version":
+                                s_name = "Vulnerable/Fixed Product Version"
+                            elif c_stat == "vendor_fix":
+                                s_name = "Vendor Advisory"
+                            else:
+                                s_name = f"OSINT Reference (L{cr['depth_level']})"
+
+                            cursor.execute('''
+                                INSERT INTO cve_sources (cve_id, source_name, url, is_poc_link, details, exploit_status)
+                                SELECT ?, ?, ?, ?, ?, ?
+                                WHERE NOT EXISTS (
+                                    SELECT 1 FROM cve_sources WHERE cve_id = ? AND (url = ? OR rtrim(url, '/') = ?)
+                                )
+                            ''', (cve_id, s_name, c_url, c_poc, c_text, c_stat, cve_id, c_url, c_url.rstrip('/')))
+
+                            if c_poc == 1:
+                                cursor.execute('UPDATE cve_main SET has_public_poc = 1 WHERE cve_id = ?', (cve_id,))
+
+                    # Save immediate OSINT intelligence record so mentions are instantly accessible
+                    cursor.execute('''
+                        INSERT OR IGNORE INTO cve_analysis (cve_id, ai_summary, recommended_action, poc_recreation_steps, keywords, is_analyzed)
+                        VALUES (?, ?, ?, ?, ?, 0)
+                    ''', (
+                        cve_id,
+                        f"Active OSINT chatter detected across {platforms_str} ({count} mention(s)). Verified proof links and PoC candidates indexed. Full AI deep-dive available on-demand.",
+                        "Review extracted source links and verify edge exposure. Apply vendor patches if PoC is confirmed.",
+                        "Proof of concept and reproduction links logged in Sources drawer.",
+                        "OSINT, In-The-Wild, Social Chatter"
+                    ))
+
                     conn.commit()
                     target_cves.append(cve_id)
             else:
@@ -240,15 +316,50 @@ def execute_pipeline_task(req: ScanRequest):
                     ''', (thirty_days_ago, f"{month_prefix}%", thirty_days_ago, limit))
                     target_cves = [r["cve_id"] for r in cursor.fetchall()]
 
-            conn.close()
-
             total_targets = len(target_cves)
-            print(f"\n[*] Processing {total_targets} Active In-The-Wild & CISA Threats...")
-            for idx, cve_id in enumerate(target_cves, 1):
-                progress_tag = f"{idx}/{total_targets}"
-                if req.exploit_find:
-                    exploit_finder.run_exploit_hunt(cve_id)
-                main.run_single_cve(cve_id, run_exploit_hunt=False, progress_prefix=progress_tag)
+            if req.exploit_find and total_targets > 0:
+                print(f"\n[*] Pre-hunting exploit modules in parallel for {total_targets} CVEs...")
+                exploit_finder.batch_exploit_hunt(target_cves, max_workers=12)
+
+            # Deep AI analysis on top viral/PoC threats via fast 3-CVE batching
+            priority_targets = []
+            for cid in target_cves:
+                cursor.execute('SELECT has_public_poc FROM cve_main WHERE cve_id = ?', (cid,))
+                p_row = cursor.fetchone()
+                if p_row and p_row['has_public_poc']:
+                    priority_targets.append(cid)
+
+            if not priority_targets and target_cves:
+                priority_targets = target_cves[:3] # Top 3 viral mentions
+            elif len(priority_targets) > 6:
+                # Prioritize top 6 verified PoC threats for immediate AI synthesis;
+                # all remaining threats are fully indexed and can be deep-analyzed on demand
+                priority_targets = priority_targets[:6]
+
+            if priority_targets:
+                print(f"\n[*] Concurrently AI-analyzing {len(priority_targets)} top priority viral/PoC threats (via Multi-CVE Batch)...")
+                batch_items = []
+                for cid in priority_targets:
+                    cursor.execute('SELECT source_name, details FROM cve_sources WHERE cve_id = ? AND details IS NOT NULL', (cid,))
+                    c_txt = f"CVE ID: {cid}\n\n"
+                    for src in cursor.fetchall():
+                        c_txt += f"--- Source: {src['source_name']} ---\n{src['details']}\n\n"
+                    batch_items.append((cid, c_txt))
+
+                batch_results = llm.analyze_cve_batch(batch_items)
+                for cid in priority_targets:
+                    res = batch_results.get(cid.strip().upper())
+                    if res and not res[6].startswith("Failed") and res[0] != "API Offline or Rate Limited.":
+                        s, a, p, v, pr, kw, m = res
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO cve_analysis (cve_id, ai_summary, recommended_action, poc_recreation_steps, keywords, is_analyzed)
+                            VALUES (?, ?, ?, ?, ?, 1)
+                        ''', (cid, s, a, p, kw))
+                        conn.commit()
+                        print(f" [+] Deep AI analysis saved for priority threat: {cid}")
+
+            conn.close()
+            print(f"\n[+] OSINT Threat Hunt Complete! Indexed {len(target_cves)} in-the-wild threats.")
                 
         elif req.mode == "weekly" or (req.mode == "custom" and req.active_week_exploits):
             end_dt = datetime.now()
@@ -655,6 +766,17 @@ def trigger_cve_analysis(cve_id: str, background_tasks: BackgroundTasks):
     return {"status": "started", "message": f"Targeted analysis started for {cve_id}"}
 
 
+@app.get("/api/cves/{cve_id}/vuln-version")
+@app.post("/api/cves/{cve_id}/vuln-version")
+def get_or_find_vulnerable_versions(cve_id: str):
+    cve_id = cve_id.strip().upper()
+    try:
+        data = vuln_version_finder.find_vulnerable_versions(cve_id)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed finding vulnerable versions for {cve_id}: {e}")
+
+
 @app.post("/api/scan")
 def launch_scan(req: ScanRequest, background_tasks: BackgroundTasks):
     if scan_state["is_running"]:
@@ -662,6 +784,19 @@ def launch_scan(req: ScanRequest, background_tasks: BackgroundTasks):
 
     background_tasks.add_task(execute_pipeline_task, req)
     return {"status": "started", "mode": req.mode, "message": f"Scan pipeline '{req.mode}' initiated."}
+
+
+@app.post("/api/scan/stop")
+def stop_scan_endpoint():
+    try:
+        import main
+        main.scan_stop_event.set()
+    except Exception:
+        pass
+    return {
+        "status": "stopping",
+        "message": "Graceful pause/stop signal dispatched to Threat Hunt Pipeline. Current batch will complete and progress is safely saved in database."
+    }
 
 
 @app.post("/api/cisa/enrich")

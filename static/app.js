@@ -538,6 +538,250 @@ function triggerAnalyzeFromModal() {
 }
 window.triggerAnalyzeFromModal = triggerAnalyzeFromModal;
 
+function extractVulnVersionDataFromCurrent(data) {
+    if (!data) return null;
+    const sources = data.sources || [];
+    const vulnSources = sources.filter(s => (s.exploit_status || '').toLowerCase() === 'vuln_version');
+    const allCandidateSources = vulnSources.length > 0 ? vulnSources : sources.filter(s => (s.url || '').includes('/releases/tag/'));
+    
+    if (allCandidateSources.length === 0) return null;
+
+    let fixedVersion = 'See advisory';
+    let vulnRange = 'Prior to fixed release';
+    
+    const recAction = (data.analysis && data.analysis.recommended_action) ? data.analysis.recommended_action : '';
+    const summary = (data.analysis && data.analysis.ai_summary) ? data.analysis.ai_summary : '';
+    const fullText = `${data.affected_product || ''} ${summary} ${recAction}`;
+    
+    const mFix = fullText.match(/(?:version\s+|to\s+version\s+|fix(?:ed)?\s+in\s+)(?:v)?([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i) ||
+                 fullText.match(/([0-9]+\.[0-9]+(?:\.[0-9]+)?)\s+or\s+later/i);
+    if (mFix) {
+        fixedVersion = mFix[1];
+        vulnRange = `< v${mFix[1]}`;
+    }
+
+    const vulnerableLinks = [];
+    const seenVersions = new Set();
+
+    for (const s of allCandidateSources) {
+        const url = s.url || '';
+        const mGh = url.match(/github\.com\/([^\/]+)\/([^\/]+)\/releases\/tag\/(v?[0-9a-zA-Z\.\-_]+)/i);
+        if (mGh) {
+            const owner = mGh[1];
+            const repo = mGh[2];
+            const tag = mGh[3];
+            const cleanTag = tag.replace(/^v/, '');
+            
+            // Exclude fixed tag itself from vulnerable downloads list
+            const isFixedTag = (cleanTag === fixedVersion || tag === `v${fixedVersion}`);
+            if (isFixedTag) {
+                continue;
+            }
+            if (seenVersions.has(tag)) continue;
+            seenVersions.add(tag);
+
+            vulnerableLinks.push({
+                version: tag,
+                source: `GitHub Repository (${owner}/${repo})`,
+                url: url,
+                direct_download_zip: `https://github.com/${owner}/${repo}/archive/refs/tags/${tag}.zip`,
+                archive_mirror_url: `https://web.archive.org/web/*/${url}`,
+                clone_command: `git clone --branch ${tag} --depth 1 https://github.com/${owner}/${repo}.git`
+            });
+        } else if (url.includes('hub.docker.com')) {
+            const vName = `${data.affected_product || 'Container'} (Container)`;
+            if (!seenVersions.has(vName)) {
+                seenVersions.add(vName);
+                vulnerableLinks.push({
+                    version: vName,
+                    source: 'Docker Hub Registry',
+                    url: url,
+                    clone_command: `docker pull ${(data.affected_vendor || 'docker').toLowerCase()}/${(data.affected_product || 'app').toLowerCase().replace(/[^a-z0-9]+/g, '-')}:vulnerable`
+                });
+            }
+        }
+    }
+
+    // If only fixed tags were present, list them as reference releases
+    if (vulnerableLinks.length === 0 && allCandidateSources.length > 0) {
+        for (const s of allCandidateSources) {
+            const url = s.url || '';
+            const mGh = url.match(/github\.com\/([^\/]+)\/([^\/]+)\/releases\/tag\/(v?[0-9a-zA-Z\.\-_]+)/i);
+            if (mGh) {
+                const tag = mGh[3];
+                vulnerableLinks.push({
+                    version: `${tag} (Reference Release)`,
+                    source: `GitHub Repository (${mGh[1]}/${mGh[2]})`,
+                    url: url,
+                    direct_download_zip: `https://github.com/${mGh[1]}/${mGh[2]}/archive/refs/tags/${tag}.zip`,
+                    archive_mirror_url: `https://web.archive.org/web/*/${url}`,
+                    clone_command: `git clone --branch ${tag} --depth 1 https://github.com/${mGh[1]}/${mGh[2]}.git`
+                });
+            }
+        }
+    }
+
+    return {
+        cve_id: data.cve_id,
+        vendor: data.affected_vendor || 'Unknown',
+        product: data.affected_product || 'Unknown',
+        fixed_version: fixedVersion,
+        vulnerable_range: vulnRange,
+        vulnerable_links: vulnerableLinks,
+        archive_sources: [
+            {
+                name: "Wayback Machine Historical Mirror",
+                url: `https://web.archive.org/web/*/http://www.oldversion.com/search?q=${encodeURIComponent(data.affected_product || '')}`
+            },
+            {
+                name: "SourceForge Software Archives",
+                url: `https://sourceforge.net/directory/?q=${encodeURIComponent(data.affected_product || '')}`
+            }
+        ]
+    };
+}
+window.extractVulnVersionDataFromCurrent = extractVulnVersionDataFromCurrent;
+
+async function findVulnVersionFromModal() {
+    const titleEl = document.getElementById('modal-cve-id');
+    const btn = document.getElementById('modal-find-vuln-btn');
+    if (!titleEl || !titleEl.textContent || titleEl.textContent === 'CVE-XXXX-YYYY') return;
+
+    const cveId = titleEl.textContent.trim();
+    const origHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Searching...';
+    }
+
+    try {
+        const existingPanel = document.getElementById('modal-vuln-version-panel');
+        if (existingPanel) {
+            existingPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        showToast(`Locating vulnerable versions & archives for ${cveId}...`);
+
+        let freshData = null;
+        try {
+            const res = await fetch(`/api/cves/${encodeURIComponent(cveId)}/vuln-version`, { method: 'POST' });
+            if (res.ok) {
+                freshData = await res.json();
+            }
+        } catch (fetchErr) {
+            // Handled via local fallback below
+        }
+
+        if (freshData && freshData.vulnerable_links && freshData.vulnerable_links.length > 0) {
+            renderVulnVersionSection(freshData);
+            const panel = document.getElementById('modal-vuln-version-panel');
+            if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            showToast(`Discovered ${freshData.vulnerable_links.length} vulnerable release/reproduction source(s)!`, 'emerald');
+        } else {
+            // Graceful fallback to currently loaded sources in the modal
+            const localData = extractVulnVersionDataFromCurrent(window._currentCveData);
+            if (localData && localData.vulnerable_links && localData.vulnerable_links.length > 0) {
+                renderVulnVersionSection(localData);
+                const panel = document.getElementById('modal-vuln-version-panel');
+                if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                showToast(`Loaded ${localData.vulnerable_links.length} vulnerable version source(s) from technical references!`, 'emerald');
+            } else {
+                showToast(`No vulnerable version artifacts found. Restart server (python main.py --gui) to query upstream APIs.`, 'amber');
+            }
+        }
+    } catch (err) {
+        const localData = extractVulnVersionDataFromCurrent(window._currentCveData);
+        if (localData && localData.vulnerable_links && localData.vulnerable_links.length > 0) {
+            renderVulnVersionSection(localData);
+            const panel = document.getElementById('modal-vuln-version-panel');
+            if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            showToast(`Loaded ${localData.vulnerable_links.length} vulnerable version source(s) from references!`, 'emerald');
+        } else {
+            showToast(`Vulnerable version discovery pending server restart.`, 'amber');
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+    }
+}
+window.findVulnVersionFromModal = findVulnVersionFromModal;
+
+function renderVulnVersionSection(data) {
+    const bodyEl = document.getElementById('modal-content-body');
+    if (!bodyEl) return;
+
+    const existing = document.getElementById('modal-vuln-version-panel');
+    if (existing) existing.remove();
+
+    const links = data.vulnerable_links || [];
+    const archives = data.archive_sources || [];
+
+    const sectionHtml = `
+        <div id="modal-vuln-version-panel" class="cve-box" style="border:1px solid rgba(245,158,11,0.4); background:rgba(245,158,11,0.04); margin-bottom:16px; animation:fadeIn 0.3s ease;">
+            <div class="cve-box-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(245,158,11,0.2); padding-bottom:8px;">
+                <div class="cve-box-title" style="color:var(--accent-amber); display:flex; align-items:center; gap:8px;">
+                    <span>📦 Vulnerable Version & Lab Reproduction Setup</span>
+                    <span class="badge badge-amber" style="font-size:10px;">Lab Validation</span>
+                </div>
+                <div style="font-size:11px; color:var(--text-dim);">
+                    Fixed in: <strong style="color:var(--accent-emerald);">${escapeHtml(data.fixed_version || 'Unknown')}</strong>
+                </div>
+            </div>
+            <div style="padding:10px 4px 4px 4px;">
+                <div style="display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap; font-size:12px;">
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:4px 10px; border-radius:6px;">
+                        <span style="color:var(--text-dim);">Vulnerable Window:</span> <strong style="color:var(--accent-amber);">${escapeHtml(data.vulnerable_range || 'N/A')}</strong>
+                    </div>
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:4px 10px; border-radius:6px;">
+                        <span style="color:var(--text-dim);">Software:</span> <strong style="color:var(--text-main);">${escapeHtml(data.vendor)} ${escapeHtml(data.product)}</strong>
+                    </div>
+                </div>
+
+                ${links.length > 0 ? `
+                    <div style="font-size:11px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Available Vulnerable Builds & Sources:</div>
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                        ${links.map(l => `
+                            <div style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.05); padding:8px 10px; border-radius:6px; display:flex; flex-direction:column; gap:6px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span class="badge badge-amber" style="font-size:10px; font-weight:bold;">${escapeHtml(l.version)}</span>
+                                        <span style="color:var(--text-dim); font-size:11px;">${escapeHtml(l.source || '')}</span>
+                                    </div>
+                                    <div style="display:flex; gap:6px; align-items:center;">
+                                        ${l.url ? `<a href="${escapeHtml(l.url)}" target="_blank" class="btn btn-xs btn-outline" style="text-decoration:none; font-size:10.5px;">🌐 Release Link</a>` : ''}
+                                        ${l.direct_download_zip ? `<a href="${escapeHtml(l.direct_download_zip)}" target="_blank" class="btn btn-xs btn-primary" style="text-decoration:none; font-size:10.5px; background:var(--accent-amber); border-color:var(--accent-amber); color:#000;">⬇️ ZIP</a>` : ''}
+                                        ${l.archive_mirror_url ? `<a href="${escapeHtml(l.archive_mirror_url)}" target="_blank" class="btn btn-xs btn-outline" style="text-decoration:none; font-size:10.5px; border-color:var(--accent-cyan); color:var(--accent-cyan);" title="Internet Archive Snapshot">🏛️ Wayback</a>` : ''}
+                                    </div>
+                                </div>
+                                ${l.clone_command ? `
+                                    <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.4); padding:4px 8px; border-radius:4px; font-family:monospace; font-size:10.5px; color:var(--accent-cyan); overflow:hidden;">
+                                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(l.clone_command)}</span>
+                                        <button class="btn btn-xs" onclick="navigator.clipboard.writeText('${escapeHtml(l.clone_command)}'); showToast('Command copied to clipboard!', 'emerald');" style="padding:1px 6px; font-size:9.5px; margin-left:8px; flex-shrink:0;">📋</button>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : `
+                    <div style="font-size:11.5px; color:var(--text-dim); padding:8px;">No direct repository releases were mapped. Check the historical archives below.</div>
+                `}
+
+                ${archives.length > 0 ? `
+                    <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); display:flex; gap:12px; font-size:11px; flex-wrap:wrap;">
+                        <span style="color:var(--text-dim);">Historical Repositories:</span>
+                        ${archives.map(a => `<a href="${escapeHtml(a.url)}" target="_blank" style="color:var(--accent-cyan); text-decoration:none;">🏛️ ${escapeHtml(a.name)} ↗</a>`).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+
+    bodyEl.insertAdjacentHTML('afterbegin', sectionHtml);
+}
+window.renderVulnVersionSection = renderVulnVersionSection;
+
 async function openCveModal(cveId) {
     const modal = document.getElementById('cve-modal');
     const titleEl = document.getElementById('modal-cve-id');
@@ -766,18 +1010,42 @@ async function openCveModal(cveId) {
                         ${sources.length > 0 ? `
                             <div class="cve-sources-list">
                                 ${sources.map(s => {
+                                    const stat = (s.exploit_status || '').toLowerCase();
                                     const isOsint = (s.source_name || '').startsWith('OSINT:');
-                                    const isUnverifiedPoc = s.exploit_status === 'unverified_osint_poc' || (isOsint && s.is_poc_link);
+                                    const isUnverifiedPoc = stat === 'unverified_osint_poc' || (isOsint && s.is_poc_link);
                                     
                                     let badgeHtml = '';
-                                    if (isUnverifiedPoc) {
-                                        badgeHtml = '<span class="badge badge-crimson" style="font-size:9.5px;" title="Unverified Internet PoC / Chatter">⚠️ Unverified OSINT</span>';
+                                    if (stat === 'blog_poc') {
+                                        badgeHtml = '<span class="badge badge-purple" style="font-size:9px;" title="Technical Research Writeup with Working PoC">⚡ PoC</span> <span class="badge badge-cyan" style="font-size:9px;">📝 Blog</span>';
+                                    } else if (stat === 'vuln_version') {
+                                        badgeHtml = '<span class="badge badge-amber" style="font-size:9px;" title="Vulnerable or Fixed Product Version Distribution">📦 Vuln Version</span>';
+                                    } else if (stat === 'blog') {
+                                        badgeHtml = '<span class="badge badge-cyan" style="font-size:9px;" title="Technical Analysis Blog / Writeup">📝 Blog</span>';
+                                    } else if (stat === 'vendor_fix') {
+                                        badgeHtml = '<span class="badge badge-low" style="font-size:9px;" title="Official Vendor Security Advisory or Fix">🛡️ Vendor Fix</span>';
+                                    } else if (isUnverifiedPoc) {
+                                        badgeHtml = '<span class="badge badge-crimson" style="font-size:9px;" title="Unverified Internet PoC / Chatter">⚠️ Unverified PoC</span>';
+                                    } else if (s.is_poc_link || stat === 'poc') {
+                                        badgeHtml = '<span class="badge badge-purple" style="font-size:9px;">⚡ Verified PoC</span>';
                                     } else if (isOsint) {
-                                        badgeHtml = `<span class="badge badge-cyan" style="font-size:9.5px;">${escapeHtml(s.source_name)}</span>`;
-                                    } else if (s.is_poc_link) {
-                                        badgeHtml = '<span class="badge badge-purple" style="font-size:9.5px;">Verified PoC</span>';
+                                        badgeHtml = `<span class="badge badge-cyan" style="font-size:9px;">${escapeHtml(s.source_name)}</span>`;
                                     } else {
-                                        badgeHtml = `<span class="badge badge-low" style="font-size:9.5px;">${escapeHtml(s.source_name || 'Link')}</span>`;
+                                        badgeHtml = `<span class="badge badge-low" style="font-size:9px;">${escapeHtml(s.source_name || 'Link')}</span>`;
+                                    }
+
+                                    let typeLabel = 'Advisory';
+                                    if (stat === 'vuln_version') {
+                                        typeLabel = 'Vuln Version';
+                                    } else if (stat === 'blog_poc') {
+                                        typeLabel = 'Research PoC';
+                                    } else if (stat === 'blog') {
+                                        typeLabel = 'Blog Writeup';
+                                    } else if (stat === 'vendor_fix') {
+                                        typeLabel = 'Vendor Advisory';
+                                    } else if (isUnverifiedPoc) {
+                                        typeLabel = 'Chatter';
+                                    } else if (s.is_poc_link) {
+                                        typeLabel = 'PoC Repo';
                                     }
 
                                     return `
@@ -789,7 +1057,7 @@ async function openCveModal(cveId) {
                                                 </a>
                                             </div>
                                             <span style="color:var(--text-dim); font-size:10.5px; flex-shrink:0;">
-                                                ${isUnverifiedPoc ? 'Chatter' : (s.is_poc_link ? 'PoC Repo' : 'Advisory')}
+                                                ${typeLabel}
                                             </span>
                                         </div>
                                     `;
@@ -803,6 +1071,12 @@ async function openCveModal(cveId) {
                 </div>
             </div>
         `;
+
+        window._currentCveData = data;
+        const autoVulnData = extractVulnVersionDataFromCurrent(data);
+        if (autoVulnData && autoVulnData.vulnerable_links && autoVulnData.vulnerable_links.length > 0) {
+            renderVulnVersionSection(autoVulnData);
+        }
 
     } catch (err) {
         bodyEl.innerHTML = `<p class="text-crimson">Error loading CVE details: ${err.message}</p>`;
@@ -908,6 +1182,20 @@ async function executeScan() {
             showToast(`🎯 Threat Hunt '${preset.toUpperCase()}' started!`);
         } else {
             showToast(`Hunt initiation failed: ${data.detail}`, 'crimson');
+        }
+    } catch (err) {
+        showToast(`Request failed: ${err}`, 'crimson');
+    }
+}
+
+async function stopActiveScan() {
+    try {
+        const res = await fetch('/api/scan/stop', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('⏸️ Scan pausing gracefully... Current item will complete and progress is saved.', 'amber');
+        } else {
+            showToast(`Failed to pause scan: ${data.detail || 'Unknown error'}`, 'crimson');
         }
     } catch (err) {
         showToast(`Request failed: ${err}`, 'crimson');
@@ -1557,14 +1845,35 @@ function renderOsintCards(items) {
                         </thead>
                         <tbody>
                             ${sources.map(s => {
-                                const isPoc = s.is_poc_link || s.exploit_status === 'unverified_osint_poc';
+                                const stat = (s.exploit_status || '').toLowerCase();
+                                const isPoc = s.is_poc_link || stat === 'poc' || stat === 'blog_poc' || stat === 'unverified_osint_poc';
                                 const sName = escapeHtml(s.source_name || 'Source');
                                 const sDetails = escapeHtml((s.details || s.source_name || '').slice(0, 65));
+
+                                let badgeClass = 'badge-low';
+                                let badgeLabel = sName;
+                                if (stat === 'blog_poc') {
+                                    badgeClass = 'badge-purple';
+                                    badgeLabel = '⚡ PoC + 📝 Blog';
+                                } else if (stat === 'vuln_version') {
+                                    badgeClass = 'badge-amber';
+                                    badgeLabel = '📦 Vuln Version';
+                                } else if (stat === 'blog') {
+                                    badgeClass = 'badge-cyan';
+                                    badgeLabel = '📝 Blog';
+                                } else if (stat === 'vendor_fix') {
+                                    badgeClass = 'badge-low';
+                                    badgeLabel = '🛡️ Advisory';
+                                } else if (isPoc) {
+                                    badgeClass = 'badge-crimson';
+                                    badgeLabel = '⚡ PoC';
+                                }
+
                                 return `
                                     <tr>
                                         <td>
-                                            <span class="badge ${isPoc ? 'badge-crimson' : 'badge-low'}" style="font-size:9px;">
-                                                ${sName}
+                                            <span class="badge ${badgeClass}" style="font-size:9px;">
+                                                ${badgeLabel}
                                             </span>
                                         </td>
                                         <td style="color:var(--text-secondary); max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${sDetails}">

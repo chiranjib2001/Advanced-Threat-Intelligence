@@ -14,7 +14,10 @@ import urllib.parse
 from collections import Counter
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
-from bs4 import BeautifulSoup
+import warnings
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning, MarkupResemblesLocatorWarning
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 LOGS_DIR = os.path.join(ROOT_DIR, "logs")
@@ -425,7 +428,12 @@ def fetch_telegram_public_cves(days_back: int = 15):
             try:
                 resp = requests.get(url, headers=headers, timeout=8)
                 if resp.status_code == 200:
-                    soup = BeautifulSoup(resp.text, "html.parser")
+                    is_xml = resp.text.lstrip().startswith("<?xml")
+                    parser = "xml" if is_xml else "html.parser"
+                    try:
+                        soup = BeautifulSoup(resp.text, parser)
+                    except Exception:
+                        soup = BeautifulSoup(resp.text, "html.parser")
                     break
             except Exception as e:
                 if attempt == 1:

@@ -373,9 +373,14 @@
                                         <pre class="cli-code"><code id="cli-command-preview">python main.py --cve CVE-2024-38063 --exploit-find</code></pre>
                                     </div>
 
-                                    <button class="btn btn-primary btn-glow btn-block" id="btn-execute-scan" style="margin-top: 16px;">
-                                        <span>🎯 Launch Threat Hunt</span>
-                                    </button>
+                                    <div style="display: flex; gap: 10px; margin-top: 16px;">
+                                        <button class="btn btn-primary btn-glow" id="btn-execute-scan" style="flex: 1;">
+                                            <span>🎯 Launch Threat Hunt</span>
+                                        </button>
+                                        <button type="button" class="btn" id="btn-stop-scan" onclick="stopActiveScan()" title="Gracefully pause or stop the active scan. Progress is automatically saved in SQLite." style="padding: 0 16px; font-weight: bold; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #fca5a5; display: inline-flex; align-items: center; gap: 6px;">
+                                            <span>⏸️ Pause / Stop</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -775,6 +780,7 @@
                 </div>
                 <div class="cve-header-actions" id="modal-header-actions">
                     <button class="btn btn-xs btn-primary" id="modal-reanalyze-btn" onclick="triggerAnalyzeFromModal()" title="Re-Analyze with AI">⚡ Re-Analyze</button>
+                    <button class="btn btn-xs btn-outline" id="modal-find-vuln-btn" onclick="findVulnVersionFromModal()" title="Find Vulnerable Version Download / Source Link" style="border-color:var(--accent-amber); color:var(--accent-amber);">📦 Find Vuln Version</button>
                     <a id="modal-export-csv" href="#" target="_blank" class="btn btn-xs btn-outline" style="text-decoration:none;" title="Export IoCs CSV">📥 CSV</a>
                     <a id="modal-export-stix" href="#" target="_blank" class="btn btn-xs btn-outline" style="text-decoration:none;" title="Export IoCs STIX 2.1">📥 STIX</a>
                     <button class="btn-close-modal" id="btn-close-modal" onclick="closeCveModal()" title="Close details panel (Esc)">✕</button>

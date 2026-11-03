@@ -21,6 +21,14 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     except Exception:
         pass
 
+import warnings
+try:
+    from bs4 import XMLParsedAsHTMLWarning, MarkupResemblesLocatorWarning
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+    warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
+except ImportError:
+    pass
+
 load_dotenv()
 
 # Setup logging to logs/ directory
@@ -38,6 +46,9 @@ logging.basicConfig(
 
 # Backend Engine Imports
 from backend import db_manager, collect, iot_ot_cve, exploit_finder, osint_hunter, report, scraper, llm, ioc_engine, enrich_engine
+
+# Global scan cancellation / pause event
+scan_stop_event = threading.Event()
 
 
 def run_single_cve(cve_id, run_exploit_hunt=False, force_nist_refetch=False, progress_prefix=None):
@@ -76,9 +87,11 @@ def run_single_cve(cve_id, run_exploit_hunt=False, force_nist_refetch=False, pro
             is_poc = row['is_poc_link']
             classification = llm.ai_link_classifier(text_content, url=raw_url)
             print(f"   [AI Classifier] -> {classification} for: {raw_url[:50]}...")
-            if classification == "POC":
+            if classification in ("POC", "BLOG_POC"):
                 is_poc = 1
                 has_found_poc = True
+            elif classification == "VULN_VERSION":
+                is_poc = 0
                 
             url_cache[clean_url] = (text_content, is_poc, classification)
             
@@ -87,6 +100,37 @@ def run_single_cve(cve_id, run_exploit_hunt=False, force_nist_refetch=False, pro
     if has_found_poc:
         cursor.execute('UPDATE cve_main SET has_public_poc = 1 WHERE cve_id = ?', (cve_id,))
     conn.commit()
+
+    # Level 2 onwards crawl: Take Level 1 links from NIST, exclude known advisories & releases, crawl sublinks
+    cursor.execute('SELECT url FROM cve_sources WHERE cve_id = ? AND url != ""', (cve_id,))
+    all_l1_urls = [r['url'] for r in cursor.fetchall()]
+    non_advisory_l1 = [
+        u for u in all_l1_urls
+        if u and not scraper.is_known_advisory_url(u) and not scraper.is_product_release_url(u)
+    ]
+
+    if non_advisory_l1 and not has_found_poc:
+        print(f"[*] Crawling Level 2 onwards from {len(non_advisory_l1)} NIST reference links (Advisories Excluded, Early PoC Exit)...")
+        chain_results = scraper.execute_chain_link_crawl(
+            cve_id, non_advisory_l1, max_depth=2, max_workers=6, stop_on_poc=True, max_total_urls=12
+        )
+        for cr in chain_results:
+            c_url = cr["url"]
+            c_poc = cr["is_poc"]
+            c_stat = cr["exploit_status"]
+            c_text = cr.get("text", "")[:4000]
+            s_name = "OSINT Research Blog (PoC)" if c_stat == "blog_poc" else ("OSINT Discovered PoC" if c_poc == 1 else f"Discovered Reference (L{cr.get('depth_level', 2)})")
+            cursor.execute('''
+                INSERT INTO cve_sources (cve_id, source_name, url, is_poc_link, details, exploit_status)
+                SELECT ?, ?, ?, ?, ?, ?
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM cve_sources WHERE cve_id = ? AND (url = ? OR rtrim(url, '/') = ?)
+                )
+            ''', (cve_id, s_name, c_url, c_poc, c_text, c_stat, cve_id, c_url, c_url.rstrip('/')))
+            if c_poc == 1:
+                has_found_poc = True
+                cursor.execute('UPDATE cve_main SET has_public_poc = 1 WHERE cve_id = ?', (cve_id,))
+        conn.commit()
     
     print(f"\n[*] Sending {cve_id} to Multi-Provider AI Engine for analysis...")
     cursor.execute('SELECT source_name, details FROM cve_sources WHERE cve_id = ? AND details IS NOT NULL', (cve_id,))
@@ -147,6 +191,7 @@ def run_single_cve(cve_id, run_exploit_hunt=False, force_nist_refetch=False, pro
 
 
 def run_pipeline(start_date, end_date, count_limit=None, fetch_cisa=False, is_iot_ot=False, all_severity=False, run_exploit_hunt=False, is_trending=False):
+    scan_stop_event.clear()
     print("=" * 60)
     print(" Automated Threat Intel Pipeline")
     if is_trending:
@@ -225,9 +270,8 @@ def run_pipeline(start_date, end_date, count_limit=None, fetch_cisa=False, is_io
         collect.enrich_epss_parallel(target_cves, run_in_background=True)
         
         if run_exploit_hunt:
-            print("\n[*] Phase 1.5: Hunting for Exploit Modules (Nuclei/Metasploit/Trickest)...")
-            for cve in target_cves:
-                exploit_finder.run_exploit_hunt(cve)
+            print(f"\n[*] Phase 1.5: Hunting for Exploit Modules in Parallel ({len(target_cves)} CVEs)...")
+            exploit_finder.batch_exploit_hunt(target_cves, max_workers=12)
                 
         print("\n[*] Phase 2: Scraping and AI-Scanning ALL Web Data for Target CVEs...")
         placeholders = ','.join('?' for _ in target_cves)
@@ -244,12 +288,18 @@ def run_pipeline(start_date, end_date, count_limit=None, fetch_cisa=False, is_io
         if unique_urls:
             print(f" [*] Concurrently scraping & classifying {len(unique_urls)} unique reference links...")
             def _scrape_classify_worker(u):
+                if scan_stop_event.is_set():
+                    return u.rstrip('/'), (None, 0, 'info')
                 txt = scraper.scrape_url_text(u)
+                if scan_stop_event.is_set():
+                    return u.rstrip('/'), (txt, 0, 'info')
                 cls = llm.ai_link_classifier(txt, url=u)
                 return u.rstrip('/'), (txt, 1 if cls == "POC" else 0, cls)
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as sc_exec:
                 for clean_u, res in sc_exec.map(_scrape_classify_worker, unique_urls):
+                    if scan_stop_event.is_set():
+                        break
                     url_cache[clean_u] = res
 
         for row in url_rows:
@@ -261,57 +311,137 @@ def run_pipeline(start_date, end_date, count_limit=None, fetch_cisa=False, is_io
             if is_poc:
                 cursor.execute('UPDATE cve_main SET has_public_poc = 1 WHERE cve_id = ?', (row['cve_id'],))
         conn.commit()
+
+        if scan_stop_event.is_set():
+            print("\n[!] Scan stopped by user request.")
+            conn.close()
+            return
+
+        # Phase 2.5: Deep Crawling Level 2 Onwards from NIST Disclosures
+        # Strictly excludes known vendor advisories and product release tags
+        print("\n[*] Phase 2.5: Deep Crawling Level 2 Onwards from NIST Disclosures (Advisories Excluded, Early PoC Exit)...")
+        cve_to_crawl = {}
+        for cid in target_cves:
+            if scan_stop_event.is_set():
+                break
+            cursor.execute('SELECT has_public_poc FROM cve_main WHERE cve_id = ?', (cid,))
+            p_row = cursor.fetchone()
+            if p_row and p_row['has_public_poc']:
+                continue
+
+            cursor.execute('SELECT url FROM cve_sources WHERE cve_id = ? AND url != ""', (cid,))
+            all_l1 = [r['url'] for r in cursor.fetchall()]
+            non_adv = [
+                u for u in all_l1
+                if u and not scraper.is_known_advisory_url(u) and not scraper.is_product_release_url(u)
+            ]
+            if non_adv:
+                cve_to_crawl[cid] = non_adv
+
+        if cve_to_crawl and not scan_stop_event.is_set():
+            print(f" [*] Parallel Level-2 chain-crawling across {len(cve_to_crawl)} CVEs...")
+            def _crawl_cve_worker(item):
+                cid, seeds = item
+                if scan_stop_event.is_set():
+                    return cid, []
+                chain_res = scraper.execute_chain_link_crawl(
+                    cid, seeds, max_depth=2, max_workers=4, stop_on_poc=True, max_total_urls=10
+                )
+                return cid, chain_res
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as cr_exec:
+                for cid, chain_results in cr_exec.map(_crawl_cve_worker, cve_to_crawl.items()):
+                    if scan_stop_event.is_set():
+                        break
+                    for cr in chain_results:
+                        c_url = cr["url"]
+                        c_poc = cr["is_poc"]
+                        c_stat = cr["exploit_status"]
+                        c_text = cr.get("text", "")[:4000]
+                        s_name = "OSINT Research Blog (PoC)" if c_stat == "blog_poc" else ("OSINT Discovered PoC" if c_poc == 1 else f"Discovered Reference (L{cr.get('depth_level', 2)})")
+                        cursor.execute('''
+                            INSERT INTO cve_sources (cve_id, source_name, url, is_poc_link, details, exploit_status)
+                            SELECT ?, ?, ?, ?, ?, ?
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM cve_sources WHERE cve_id = ? AND (url = ? OR rtrim(url, '/') = ?)
+                            )
+                        ''', (cid, s_name, c_url, c_poc, c_text, c_stat, cid, c_url, c_url.rstrip('/')))
+                        if c_poc == 1:
+                            cursor.execute('UPDATE cve_main SET has_public_poc = 1 WHERE cve_id = ?', (cid,))
+            conn.commit()
+
         conn.close()
         
+        if scan_stop_event.is_set():
+            print("\n[!] Scan stopped by user request before AI analysis.")
+            return
+
         total_targets = len(target_cves)
-        print(f"\n[*] Phase 3: CONCURRENT Multi-Provider AI Analysis ({total_targets} threats)...")
+        batch_size = 3 if total_targets > 3 else 1
+        cve_batches = [target_cves[i:i + batch_size] for i in range(0, len(target_cves), batch_size)]
+        print(f"\n[*] Phase 3: CONCURRENT Multi-Provider AI Analysis ({total_targets} threats across {len(cve_batches)} batches)...")
         completed_count = 0
         progress_lock = threading.Lock()
 
-        def analyze_worker(cve_id):
+        def analyze_batch_worker(batch_ids):
             nonlocal completed_count
+            if scan_stop_event.is_set():
+                return
+
             thread_conn = db_manager.get_db_connection()
             thread_cursor = thread_conn.cursor()
             try:
-                thread_cursor.execute('SELECT source_name, details FROM cve_sources WHERE cve_id = ? AND details IS NOT NULL', (cve_id,))
-                combined_text = f"CVE ID: {cve_id}\n\n"
-                for src in thread_cursor.fetchall():
-                    combined_text += f"--- Source: {src['source_name']} ---\n{src['details']}\n\n"
-                    
-                summary, action, poc, ai_vendor, ai_product, keywords, ai_model = llm.analyze_individual_cve(cve_id, combined_text)
-                
-                if summary and not ai_model.startswith("Failed") and summary != "API Offline or Rate Limited.":
-                    thread_cursor.execute('''
-                        INSERT OR REPLACE INTO cve_analysis (cve_id, ai_summary, recommended_action, poc_recreation_steps, keywords, is_analyzed)
-                        VALUES (?, ?, ?, ?, ?, 1)
-                    ''', (cve_id, summary, action, poc, keywords))
-                    
-                    if ai_vendor.lower() != "unknown" or ai_product.lower() != "unknown":
-                        thread_cursor.execute('UPDATE cve_main SET affected_vendor = ?, affected_product = ? WHERE cve_id = ?', (ai_vendor, ai_product, cve_id))
-                    thread_conn.commit()
+                batch_items = []
+                for cid in batch_ids:
+                    thread_cursor.execute('SELECT source_name, details FROM cve_sources WHERE cve_id = ? AND details IS NOT NULL', (cid,))
+                    c_txt = f"CVE ID: {cid}\n\n"
+                    for src in thread_cursor.fetchall():
+                        c_txt += f"--- Source: {src['source_name']} ---\n{src['details']}\n\n"
+                    batch_items.append((cid, c_txt))
 
-                    # Run Zero-Cost Parallel IoC Enrichment
-                    try:
-                        ioc_engine.parallel_enrich_cve(cve_id, raw_poc_text=poc)
-                    except Exception as _e:
-                        logging.warning(f"IoC enrichment failed for {cve_id}: {_e}")
-                    
-                    thread_cursor.execute('SELECT severity, cvss_v3_score, cvss_vector, epss_score, affected_vendor, affected_product FROM cve_main WHERE cve_id = ?', (cve_id,))
-                    cve_data = thread_cursor.fetchone()
-                    severity = cve_data['severity'] if cve_data and cve_data['severity'] else "Unknown"
-                    cvss_score = cve_data['cvss_v3_score'] if cve_data and cve_data['cvss_v3_score'] else 0.0
-                    cvss_vector = cve_data['cvss_vector'] if cve_data and cve_data['cvss_vector'] else "Unknown"
-                    epss_display = collect.format_epss(cve_data['epss_score'] if cve_data else None)
-                    vendor = cve_data['affected_vendor'] if cve_data else "Unknown"
-                    product = cve_data['affected_product'] if cve_data else "Unknown"
-                    
-                    thread_cursor.execute('SELECT url FROM cve_sources WHERE cve_id = ? AND is_poc_link = 1 AND url != ""', (cve_id,))
-                    poc_links = thread_cursor.fetchall()
-                    links_text = "\n".join([f"- {row['url']}" for row in poc_links]) if poc_links else "- No public exploits identified."
-                    
-                    short_summary = summary[:400] + "..." if len(summary) > 400 else summary
-                    
-                    chunk_markdown = f"""🚨 **Real-Time Alert: {cve_id}** 🚨\n
+                # Batch LLM Analysis in single prompt
+                batch_results = llm.analyze_cve_batch(batch_items)
+
+                for cve_id in batch_ids:
+                    if scan_stop_event.is_set():
+                        return
+                    res = batch_results.get(cve_id.strip().upper())
+                    if not res:
+                        continue
+                    summary, action, poc, ai_vendor, ai_product, keywords, ai_model = res
+
+                    if summary and not ai_model.startswith("Failed") and summary != "API Offline or Rate Limited.":
+                        thread_cursor.execute('''
+                            INSERT OR REPLACE INTO cve_analysis (cve_id, ai_summary, recommended_action, poc_recreation_steps, keywords, is_analyzed)
+                            VALUES (?, ?, ?, ?, ?, 1)
+                        ''', (cve_id, summary, action, poc, keywords))
+
+                        if ai_vendor.lower() != "unknown" or ai_product.lower() != "unknown":
+                            thread_cursor.execute('UPDATE cve_main SET affected_vendor = ?, affected_product = ? WHERE cve_id = ?', (ai_vendor, ai_product, cve_id))
+                        thread_conn.commit()
+
+                        # Run Zero-Cost Parallel IoC Enrichment
+                        try:
+                            ioc_engine.parallel_enrich_cve(cve_id, raw_poc_text=poc)
+                        except Exception as _e:
+                            logging.warning(f"IoC enrichment failed for {cve_id}: {_e}")
+
+                        thread_cursor.execute('SELECT severity, cvss_v3_score, cvss_vector, epss_score, affected_vendor, affected_product FROM cve_main WHERE cve_id = ?', (cve_id,))
+                        cve_data = thread_cursor.fetchone()
+                        severity = cve_data['severity'] if cve_data and cve_data['severity'] else "Unknown"
+                        cvss_score = cve_data['cvss_v3_score'] if cve_data and cve_data['cvss_v3_score'] else 0.0
+                        cvss_vector = cve_data['cvss_vector'] if cve_data and cve_data['cvss_vector'] else "Unknown"
+                        epss_display = collect.format_epss(cve_data['epss_score'] if cve_data else None)
+                        vendor = cve_data['affected_vendor'] if cve_data else "Unknown"
+                        product = cve_data['affected_product'] if cve_data else "Unknown"
+
+                        thread_cursor.execute('SELECT url FROM cve_sources WHERE cve_id = ? AND is_poc_link = 1 AND url != ""', (cve_id,))
+                        poc_links = thread_cursor.fetchall()
+                        links_text = "\n".join([f"- {row['url']}" for row in poc_links]) if poc_links else "- No public exploits identified."
+
+                        short_summary = summary[:400] + "..." if len(summary) > 400 else summary
+
+                        chunk_markdown = f"""🚨 **Real-Time Alert: {cve_id}** 🚨\n
 **Severity:** {severity} | **CVSS:** {cvss_score} ({cvss_vector}) | **EPSS:** {epss_display}\n
 **Product:** {vendor} {product}\n
 **Keywords:** {keywords}\n
@@ -320,29 +450,29 @@ def run_pipeline(start_date, end_date, count_limit=None, fetch_cisa=False, is_io
 ✅ **Action:** {action}\n
 🛠️ **PoC / Recreation Steps:**\n```\n{poc}\n```\n
 🔗 **Exploit Links:**\n{links_text}"""
-                    
-                    with progress_lock:
-                        completed_count += 1
-                        progress_tag = f"{completed_count}/{total_targets}"
 
-                    report.send_webhook(chunk_markdown, progress_prefix=progress_tag)
-                    print(f" [{progress_tag}] Finished & Alerted: {cve_id}")
-                else:
-                    with progress_lock:
-                        completed_count += 1
-                        progress_tag = f"{completed_count}/{total_targets}"
-                    print(f" [{progress_tag}] AI analysis skipped/rate-limited: {cve_id}")
+                        with progress_lock:
+                            completed_count += 1
+                            progress_tag = f"{completed_count}/{total_targets}"
+
+                        report.send_webhook(chunk_markdown, progress_prefix=progress_tag)
+                        print(f" [{progress_tag}] Finished & Alerted: {cve_id}")
+                    else:
+                        with progress_lock:
+                            completed_count += 1
+                            progress_tag = f"{completed_count}/{total_targets}"
+                        print(f" [{progress_tag}] AI analysis skipped/rate-limited: {cve_id}")
             except Exception as e:
                 with progress_lock:
-                    completed_count += 1
+                    completed_count += len(batch_ids)
                     progress_tag = f"{completed_count}/{total_targets}"
-                logging.error(f"[THREAD ERROR] [{progress_tag}] Failed processing {cve_id}: {e}")
+                logging.error(f"[THREAD ERROR] [{progress_tag}] Failed processing batch {batch_ids}: {e}")
             finally:
                 thread_conn.close()
-                
-        time.sleep(1)
+
+        time.sleep(0.5)
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            executor.map(analyze_worker, target_cves)
+            executor.map(analyze_batch_worker, cve_batches)
     else:
         conn.close()
             
@@ -507,13 +637,15 @@ if __name__ == "__main__":
         conn.close()
 
         total_targets = len(target_cves)
+        if args.exploit_find and total_targets > 0:
+            print(f"\n[*] Pre-hunting exploit modules in parallel for {total_targets} CVEs...")
+            exploit_finder.batch_exploit_hunt(target_cves, max_workers=12)
+
         print(f"\n[*] Processing {total_targets} Active In-The-Wild & CISA Threats (Concurrent Pool)...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             def _in_wild_worker(item):
                 idx, cid = item
                 progress_tag = f"{idx}/{total_targets}"
-                if args.exploit_find:
-                    exploit_finder.run_exploit_hunt(cid)
                 run_single_cve(cid, run_exploit_hunt=False, progress_prefix=progress_tag)
             executor.map(_in_wild_worker, list(enumerate(target_cves, 1)))
 

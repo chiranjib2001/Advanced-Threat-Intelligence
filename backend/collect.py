@@ -397,14 +397,34 @@ def process_nist_vulns(vulns, cursor, require_network=True):
             clean_url = raw_url.rstrip('/')
             tags = " ".join(ref.get("tags", [])).lower()
             url_lower = raw_url.lower()
-            is_poc = 1 if ("exploit" in tags or "poc" in tags or "github.com" in url_lower or "gitlab.com" in url_lower or "poc" in url_lower) else 0
+
+            is_release = any(p in url_lower for p in ["/releases/tag/", "/releases/download/", "/archive/refs/tags/", "/releases", "/tags/", "/tags"])
+            is_commit_or_advisory = any(p in url_lower for p in ["/commit/", "/pull/", "/security/advisories/", "cisa.gov", "advisory", "bulletin"])
+
+            if is_release:
+                is_poc = 0
+                source_name = "Vulnerable/Fixed Product Version"
+                status = "vuln_version"
+            elif is_commit_or_advisory:
+                is_poc = 0
+                source_name = "Vendor Advisory / Patch"
+                status = "vendor_fix"
+            elif "exploit" in tags or "poc" in tags or any(url_lower.endswith(ext) for ext in [".py", ".sh", ".c", ".go", ".rb", ".pl"]):
+                is_poc = 1
+                source_name = "External Reference (PoC)"
+                status = "poc"
+            else:
+                is_poc = 0
+                source_name = "External Reference"
+                status = "info"
+
             cursor.execute('''
-                INSERT INTO cve_sources (cve_id, source_name, url, is_poc_link)
-                SELECT ?, 'External Reference', ?, ?
+                INSERT INTO cve_sources (cve_id, source_name, url, is_poc_link, exploit_status)
+                SELECT ?, ?, ?, ?, ?
                 WHERE NOT EXISTS (
                     SELECT 1 FROM cve_sources WHERE cve_id = ? AND (url = ? OR url = ? OR rtrim(url, '/') = ?)
                 )
-            ''', (cve_id, raw_url, is_poc, cve_id, raw_url, clean_url, clean_url))
+            ''', (cve_id, source_name, raw_url, is_poc, status, cve_id, raw_url, clean_url, clean_url))
 
 def fetch_single_cve(cve_id, force_refetch=False):
     cve_id = cve_id.strip().upper()
@@ -484,6 +504,14 @@ def fetch_nist_cves(start_dt=None, end_dt=None):
         start_index = 0
         
         while True:
+            try:
+                import main
+                if getattr(main, 'scan_stop_event', None) and main.scan_stop_event.is_set():
+                    print("[*] Scan pause requested. Stopping NIST data fetch.")
+                    break
+            except Exception:
+                pass
+
             params = {"pubStartDate": start_str, "pubEndDate": end_str, "resultsPerPage": 2000, "startIndex": start_index}
             response = safe_get(NIST_BASE_URL, params=params)
             if not response: break
