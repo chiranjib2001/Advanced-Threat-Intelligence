@@ -1,13 +1,5 @@
 # Experimental Evaluation Benchmark Dataset (September 22–24, 2026)
 
-**Conference:** SCIS-2026 / ICMIB-2026  
-**Paper ID:** 1150  
-**Paper Title:** *Bridging the Exploit and Reproduction Gap: An Autonomous Cyber Threat Intelligence Framework with Deep Heuristic Crawling and Historical Vulnerability Artifact Retrieval*  
-**Authors:** Chiranjib Mohapatra, Yugandar Aaleswara, Divya Bridgit Tomy, Abhishek Nayak, Raja Kulukuri, Teja Sai Hanish Gudepu, Amar Ranjan Dash, Shubham Saini  
-**Repository:** [github.com/chiranjib2001/Advanced-Threat-Intelligence](https://github.com/chiranjib2001/Advanced-Threat-Intelligence)
-
----
-
 ## 1. Overview and Scope
 
 This directory contains the primary empirical evaluation dataset and verification artifacts supporting the quantitative findings presented in the accepted manuscript (`ATI Final.pdf` / `review_paper.pdf`). 
