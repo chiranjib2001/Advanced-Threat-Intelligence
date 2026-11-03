@@ -1,0 +1,7 @@
+Pipeline Operational Metric,Observed Count,Percentage / Rate,Operational Significance
+Total Disclosed CVEs Ingested (48h Window),137,100.0%,Complete disclosure window coverage
+"Prioritized Triage Candidates (max(CVSS, EPSS))",71,51.8%,High-risk weaponized threats elevated
+Verified Functional PoCs Discovered (D <= 5),49,35.8%,Actionable attack scripts harvested
+Release Tags Correctly Suppressed (VULN_VERSION),38,100.0%,False-positive exploit alarms eliminated
+Docker / Wayback Reproduction Manifests Generated,44,89.8%,1-click laboratory verification testbeds
+Mean Execution & Triage Latency per CVE (s),18,18.4 s,High-throughput automated pipeline

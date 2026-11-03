@@ -1,0 +1,7 @@
+Configuration / Variant,PoC Discovery Yield (Count),Precision (PoC Accuracy),False-Positive Exploit Alarms,Lab Manifest Success Rate,Pipeline Safety Status
+Full Proposed ATI Framework,591 (100.0%),94.2%,0 (Suppressed),89.8% (44/49),100% Quarantined
+w/o Deep Crawling (D <= 1 shallow scraper),137 (23.2%),91.8%,0,38.6%,Quarantined
+w/o 6-Class Taxonomy (binary regex classifier),591 (100.0%),56.3%,38 false alarms,42.1%,Quarantined
+w/o Dual-Tier Trust Quarantine (Q_fake disabled),591 (100.0%),92.4%,0,87.2%,Contaminated (11 RATs)
+w/o tau(v) Version Solver & Wayback CDX,591 (100.0%),94.2%,0,29.5% (Dependency rot),Quarantined
+"Baseline (Shallow D=1, Binary Classifier, No CDX)",137 (23.2%),52.1%,38 false alarms,18.2%,Contaminated

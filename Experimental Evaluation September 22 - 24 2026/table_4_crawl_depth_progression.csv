@@ -1,0 +1,7 @@
+Depth Level (D),Unique URLs Visited,Cumulative Links Parsed,PoCs at Depth,Cumulative PoCs (Yield),Median Latency (s),Unique CVEs with PoC,Actual Coverage (%)
+Level 0,446,846,77,77 (13.0%),1.2 s,35,9.6%
+Level 1,267,1589,60,137 (23.2%),4.5 s,69,19.0%
+Level 2,587,2679,32,169 (28.6%),11.8 s,73,20.1%
+Level 3,1802,5202,65,234 (39.6%),20.4 s,73,20.1%
+Level 4,4184,10275,119,353 (59.7%),28.6 s,75,20.6%
+Level 5,11221,23206,238,591 (100.0%),34.1 s,77,21.2%

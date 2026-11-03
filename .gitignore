@@ -41,6 +41,7 @@ data/*_cache.json
 !data/known_advisory_links_url.txt
 !data/known_exploit_links_url.txt
 !data/software_archive_sources.json
+!Experimental Evaluation September 22 - 24 2026/*.db
 
 # ------------------------------------------------------------------------------
 # 3. Operational Logs & Scratch Buffers
