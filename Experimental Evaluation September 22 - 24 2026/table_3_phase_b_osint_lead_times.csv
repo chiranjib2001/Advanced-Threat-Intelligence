@@ -1,7 +1,7 @@
 CVE Identifier,Target Software / Architecture,ATI OSINT Discovery (t_osint),CISA KEV Listing (t_cisa),Defensive Lead Time (Delta t_cisa),Mention Count
-CVE-2026-87902,Ivanti / Enterprise Gateway,2026-09-22,2026-09-25,+3.0 Days,27
-CVE-2026-85102,Enterprise Identity Service,2026-09-09,2026-09-22,+13.0 Days,4
-CVE-2026-5430,Network Controller / IoT Gateway,2026-08-06,2026-09-24,+49.0 Days,5
-CVE-2026-65660,Cloud Virtualization Appliance,2026-08-11,2026-09-25,+45.0 Days,5
-CVE-2026-88771,Edge Remote Code Execution,2026-09-27,2026-09-27,0.0 Days,15
-CVE-2026-7273,Industrial Controller Firmware,2026-06-16,2026-09-21,+97.0 Days,3
+CVE-2026-87902,WordPress / WordPress Core,2026-09-22,2026-09-25,+3.0 Days,27
+CVE-2026-85102,Check Point / Remote Access VPN,2026-09-09,2026-09-22,+13.0 Days,4
+CVE-2026-5430,WSO2 / API Manager & Gateway,2026-08-06,2026-09-24,+49.0 Days,5
+CVE-2026-65660,Microsoft / SharePoint Server,2026-08-11,2026-09-25,+45.0 Days,5
+CVE-2026-88771,Citrix / NetScaler ADC & Gateway,2026-09-27,2026-09-27,0.0 Days,15
+CVE-2026-7273,Zyxel / GS1900 Switch Firmware,2026-06-16,2026-09-21,+97.0 Days,3
