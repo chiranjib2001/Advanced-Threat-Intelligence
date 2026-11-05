@@ -46,24 +46,35 @@ def verify():
     # TABLE 3: Phase B Multi-Stream OSINT Threat Detection vs. Federal CISA KEV
     # --------------------------------------------------------------------------
     print_separator("Table 3: Phase B Multi-Stream OSINT Early Threat Detection vs. Federal CISA KEV")
-    cur.execute("SELECT cve_id, target_software, osint_discovery_date, cisa_kev_listing_date, defensive_lead_time_days, mention_count FROM benchmark_phase_b_osint ORDER BY defensive_lead_time_days DESC")
+    cur.execute("SELECT cve_id, target_software, osint_discovery_date, alert_trigger_date, cisa_kev_listing_date, defensive_lead_time_days, alert_lead_time_days, mention_count FROM benchmark_phase_b_osint ORDER BY defensive_lead_time_days DESC")
     rows = cur.fetchall()
-    header = f"{'CVE Identifier':<16} | {'Target Software / Architecture':<36} | {'OSINT Date':<11} | {'CISA Date':<11} | {'Lead Time':<10} | {'Mentions'}"
+    header = f"{'CVE Identifier':<16} | {'Target Software / Architecture':<34} | {'t_first':<10} | {'t_alert':<10} | {'t_cisa':<10} | {'First Lead':<10} | {'Alert Lead':<10} | {'Mentions'}"
     print(header)
     print("-" * len(header))
-    total_lead = 0
-    lead_times = []
+    total_first_lead = 0
+    total_alert_lead = 0
+    first_lead_times = []
+    alert_lead_times = []
     for r in rows:
-        lead_str = f"+{r['defensive_lead_time_days']:.1f} Days" if r['defensive_lead_time_days'] > 0 else f"{r['defensive_lead_time_days']:.1f} Days"
-        print(f"{r['cve_id']:<16} | {r['target_software']:<36} | {r['osint_discovery_date']:<11} | {r['cisa_kev_listing_date']:<11} | {lead_str:<10} | {r['mention_count']}")
-        total_lead += r['defensive_lead_time_days']
-        lead_times.append(r['defensive_lead_time_days'])
+        first_lead_str = f"+{r['defensive_lead_time_days']:.1f}d" if r['defensive_lead_time_days'] > 0 else f"{r['defensive_lead_time_days']:.1f}d"
+        alert_lead_val = r['alert_lead_time_days'] if r['alert_lead_time_days'] is not None else r['defensive_lead_time_days']
+        alert_lead_str = f"+{alert_lead_val:.1f}d" if alert_lead_val > 0 else f"{alert_lead_val:.1f}d"
+        alert_date_str = r['alert_trigger_date'] if r['alert_trigger_date'] else r['osint_discovery_date']
+        print(f"{r['cve_id']:<16} | {r['target_software']:<34} | {r['osint_discovery_date']:<10} | {alert_date_str:<10} | {r['cisa_kev_listing_date']:<10} | {first_lead_str:<10} | {alert_lead_str:<10} | {r['mention_count']}")
+        total_first_lead += r['defensive_lead_time_days']
+        total_alert_lead += alert_lead_val
+        first_lead_times.append(r['defensive_lead_time_days'])
+        alert_lead_times.append(alert_lead_val)
     
-    avg_lead = total_lead / len(rows)
-    lead_times.sort()
-    med_lead = (lead_times[len(lead_times)//2 - 1] + lead_times[len(lead_times)//2]) / 2 if len(lead_times) % 2 == 0 else lead_times[len(lead_times)//2]
+    avg_first = total_first_lead / len(rows)
+    avg_alert = total_alert_lead / len(rows)
+    first_lead_times.sort()
+    alert_lead_times.sort()
+    med_first = (first_lead_times[len(first_lead_times)//2 - 1] + first_lead_times[len(first_lead_times)//2]) / 2 if len(first_lead_times) % 2 == 0 else first_lead_times[len(first_lead_times)//2]
+    med_alert = (alert_lead_times[len(alert_lead_times)//2 - 1] + alert_lead_times[len(alert_lead_times)//2]) / 2 if len(alert_lead_times) % 2 == 0 else alert_lead_times[len(alert_lead_times)//2]
     print("-" * len(header))
-    print(f"Average Proactive Lead Time: +{avg_lead:.1f} Days  |  Median Proactive Lead Time: +{med_lead:.1f} Days")
+    print(f"First Observation Lead: Mean = +{avg_first:.1f} Days  |  Median = +{med_first:.1f} Days")
+    print(f"Corroborated Alert Lead: Mean = +{avg_alert:.1f} Days  |  Median = +{med_alert:.1f} Days")
 
     # --------------------------------------------------------------------------
     # TABLE 4: Crawl Depth Traversal Progression vs. Exploit Discovery Yield

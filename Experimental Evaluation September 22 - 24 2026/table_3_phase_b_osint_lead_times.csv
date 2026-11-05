@@ -1,7 +1,7 @@
-CVE Identifier,Target Software / Architecture,ATI OSINT Discovery (t_osint),CISA KEV Listing (t_cisa),Defensive Lead Time (Delta t_cisa),Mention Count
-CVE-2026-87902,WordPress / WordPress Core,2026-09-22,2026-09-25,+3.0 Days,27
-CVE-2026-85102,Check Point / Remote Access VPN,2026-09-09,2026-09-22,+13.0 Days,4
-CVE-2026-5430,WSO2 / API Manager & Gateway,2026-08-06,2026-09-24,+49.0 Days,5
-CVE-2026-65660,Microsoft / SharePoint Server,2026-08-11,2026-09-25,+45.0 Days,5
-CVE-2026-88771,Citrix / NetScaler ADC & Gateway,2026-09-27,2026-09-27,0.0 Days,15
-CVE-2026-7273,Zyxel / GS1900 Switch Firmware,2026-06-16,2026-09-21,+97.0 Days,3
+CVE Identifier,Target Software / Architecture,Earliest OSINT (t_first),Alert Trigger (t_alert),CISA KEV Listing (t_cisa),First Lead Time (Delta t_first),Alert Lead Time (Delta t_alert),Mention Count
+CVE-2026-87902,WordPress / WordPress Core,2026-09-22,2026-09-22,2026-09-25,+3.0 Days,+3.0 Days,27
+CVE-2026-85102,Check Point / Remote Access VPN,2026-09-09,2026-09-10,2026-09-22,+13.0 Days,+12.0 Days,4
+CVE-2026-5430,WSO2 / API Manager & Gateway,2026-08-06,2026-08-08,2026-09-24,+49.0 Days,+47.0 Days,5
+CVE-2026-65660,Microsoft / SharePoint Server,2026-08-11,2026-08-12,2026-09-25,+45.0 Days,+44.0 Days,5
+CVE-2026-88771,Citrix / NetScaler ADC & Gateway,2026-09-27,2026-09-27,2026-09-27,0.0 Days,0.0 Days,15
+CVE-2026-7273,Zyxel / GS1900 Switch Firmware,2026-06-16,2026-06-18,2026-09-21,+97.0 Days,+95.0 Days,3
