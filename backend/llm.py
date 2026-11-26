@@ -62,13 +62,18 @@ CEREBRAS_MODELS = [
 ]
 
 OPENROUTER_MODELS = [
-    "nvidia/nemotron-3.5-lightning:free",
     "nvidia/nemotron-3-ultra-550b-a55b:free",
-    "liquid/lfm-2.5-2.6b:free",
-    "nex-agi/nex-n2.5-mini:free",
-    "cohere/north-mini-code:free",
-    "poolside/laguna-s-2.1:free",
-    "thinkingmachines/inkling:free"
+    "particle-ai/particle-1:free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3.5-super-vl:free",
+    "dots-studio/dots-3-note-preview:free",
+    "liquid/lfm-3-1.7b:free",
+    "openrouter/free",
+    "inclusionai/ling-3.2-flash:free",
+    "baidu/ernie-5.5-flash-preview:free",
+    "recursive/flint-v1.0:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 ]
 
 GEMINI_MODELS = [
@@ -82,6 +87,16 @@ GEMINI_MODELS = [
 MISTRAL_MODELS = [
     "codestral-latest",
     "mistral-small-latest"
+]
+
+# Targeted high-yield model sequence for single CVE analyses (ranked by empirical PoC yield & quality)
+SINGLE_CVE_HIGH_YIELD_MODELS = [
+    ("groq", "openai/gpt-oss-120b"),
+    ("gemini", "gemini-flash-latest"),
+    ("gemini", "gemini-2.5-flash"),
+    ("openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free"),
+    ("openrouter", "particle-ai/particle-1:free"),
+    ("mistral", "codestral-latest"),
 ]
 
 KEYWORD_LIST = [
@@ -197,13 +212,15 @@ def _call_llm_chat(messages, max_tokens=1000, temperature=0.1, custom_models=Non
                     err_str = str(e)
 
                     # Dynamic key cooldown on rate limit (429), payment required (402), or quota exhaustion
-                    if "402" in err_str or "payment" in err_str.lower() or "billing" in err_str.lower():
+                    if "402" in err_str or "payment required" in err_str.lower():
                         _set_cooldown(key, 86400.0)
-                        logger.warning(f"{req_tag} -> Payment required / quota exhausted (402). Placing key in cooldown for 24h.")
-                    elif "429" in err_str or "rate limit" in err_str.lower() or "free-models-per-day" in err_str:
-                        cooldown_time = 86400.0 if "free-models-per-day" in err_str else 60.0
-                        _set_cooldown(key, cooldown_time)
-                        logger.warning(f"{req_tag} -> Rate limit triggered. Placing key in cooldown for {cooldown_time}s.")
+                        logger.warning(f"{req_tag} -> Payment required (402). Placing key in cooldown for 24h.")
+                    elif "free-models-per-day" in err_str:
+                        _set_cooldown(key, 86400.0)
+                        logger.warning(f"{req_tag} -> OpenRouter daily free tier exhausted. Placing key in cooldown for 24h.")
+                    elif "429" in err_str or "rate limit" in err_str.lower() or "too many requests" in err_str.lower():
+                        _set_cooldown(key, 60.0)
+                        logger.warning(f"{req_tag} -> Rate limit triggered. Placing key in cooldown for 60.0s.")
                     elif "timeout" in err_str.lower() or "timed out" in err_str.lower():
                         if p_name == "openrouter":
                             _set_cooldown(key, 300.0)
@@ -238,6 +255,80 @@ def _call_llm_chat(messages, max_tokens=1000, temperature=0.1, custom_models=Non
     logger.error("CRITICAL: All configured LLM providers exhausted after full cascade.")
     api_logger.error("CRITICAL: All configured LLM providers exhausted after full cascade.")
     return None, "Failed (All Models Offline)"
+
+
+def _call_llm_targeted(messages, model_targets, max_tokens=1500, temperature=0.1):
+    """
+    Direct model router for targeted single-CVE threat intelligence.
+    Iterates strictly through high-yield models, skipping keys in cooldown.
+    Returns: (reply, model_tag) or (None, None) if all target models fail.
+    """
+    provider_configs = {
+        "groq": (get_groq_keys(), "https://api.groq.com/openai/v1", 12.0),
+        "gemini": (get_gemini_keys(), "https://generativelanguage.googleapis.com/v1beta/openai/", 18.0),
+        "mistral": (get_mistral_keys(), "https://api.mistral.ai/v1", 12.0),
+        "cerebras": (get_cerebras_keys(), "https://api.cerebras.ai/v1", 6.0),
+        "openrouter": (get_openrouter_keys(), "https://openrouter.ai/api/v1", 12.0)
+    }
+
+    for p_name, model in model_targets:
+        if p_name not in provider_configs:
+            continue
+        keys, base_url, timeout_sec = provider_configs[p_name]
+        if not keys:
+            continue
+
+        for key in keys:
+            if _is_cooling_down(key):
+                continue
+
+            masked = _mask_key(key)
+            req_tag = f"[{p_name.upper()}] [Model: '{model}'] [Key: {masked}]"
+            api_logger.info(f"{req_tag} (Targeted High-Yield) -> Sending completion request...")
+            t_start = time.time()
+
+            try:
+                client = OpenAI(base_url=base_url, api_key=key, timeout=timeout_sec, max_retries=0)
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+                latency = time.time() - t_start
+                raw_content = response.choices[0].message.content if response.choices and response.choices[0].message else ""
+                reply = (raw_content or "").strip()
+
+                if reply:
+                    _record_telemetry(p_name, True, latency, model)
+                    success_msg = f"{req_tag} (Targeted High-Yield) -> SUCCESS in {latency:.2f}s! ({len(reply)} chars)"
+                    api_logger.info(success_msg)
+                    logger.info(success_msg)
+                    return reply, f"{p_name.capitalize()} ({model})"
+
+            except Exception as e:
+                latency = time.time() - t_start
+                _record_telemetry(p_name, False, latency, model)
+                err_str = str(e)
+
+                if "402" in err_str or "payment required" in err_str.lower():
+                    _set_cooldown(key, 86400.0)
+                    logger.warning(f"{req_tag} -> Payment required (402). Placing key in cooldown for 24h.")
+                elif "free-models-per-day" in err_str:
+                    _set_cooldown(key, 86400.0)
+                    logger.warning(f"{req_tag} -> OpenRouter daily free tier exhausted. Placing key in cooldown for 24h.")
+                elif "429" in err_str or "rate limit" in err_str.lower() or "too many requests" in err_str.lower():
+                    _set_cooldown(key, 60.0)
+                    logger.warning(f"{req_tag} -> Rate limit triggered. Placing key in cooldown for 60.0s.")
+
+                err_snippet = err_str[:160].replace("\n", " ")
+                fail_msg = f"{req_tag} -> FAILED in {latency:.2f}s: {err_snippet}"
+                api_logger.warning(fail_msg)
+                logger.warning(fail_msg)
+                time.sleep(0.1)
+                continue
+
+    return None, None
 
 
 def ai_link_classifier(text_content, url=None, thread_models=None):
@@ -384,18 +475,24 @@ Output ONLY the selected URLs, exactly one URL per line, with no other commentar
     return sorted_candidates[:max_select]
 
 
-def analyze_individual_cve(cve_id, combined_text_data, thread_models=None):
+def analyze_individual_cve(cve_id, combined_text_data, thread_models=None, prioritize_poc=False):
     """
     Extracts structured intelligence with strict XML schema for a single CVE.
+    When prioritize_poc=True, prioritizes proven high-yield PoC models (Groq -> Gemini -> Nemotron-3-Ultra -> Mistral)
+    before falling back to the standard multi-provider cascade.
     Returns: summary, action, poc, vendor, product, keywords, model_used
     """
-    logger.info(f"AI Analyzing {cve_id} via Multi-Provider Cascade...")
+    logger.info(f"AI Analyzing {cve_id} (prioritize_poc={prioritize_poc})...")
 
     strict_prompt = f"""You are a precise cybersecurity analyst. You MUST output your response EXACTLY using the following XML tags. Do NOT add any conversational text outside these tags.
 
-<summary>Provide a 5 to 6 line summary of the threat.</summary>
+<summary>Provide a 5 to 6 line technical summary of the threat.</summary>
 <action>Provide a 1 line recommended action.</action>
-<poc>Include the exact HTML/JS/Python PoC code, ADD recreation steps, OR malicious one-liner URLs here. Do not overlook simple URL payloads. If absolutely none exist, write 'None'.</poc>
+<poc>CRITICAL REQUIREMENTS:
+- Provide the exact working Proof of Concept code, runnable curl/shell command, or technical recreation steps.
+- If a GitHub repository or exploit link is mentioned in the text, extract its concrete execution syntax (e.g. 'git clone <repo>', parameter flags, or HTTP endpoints).
+- NEVER output a bare URL as the sole content of this tag. If only a repository link exists, provide the concrete steps to clone, configure, and execute it.
+- If absolutely no technical recreation steps or exploit payloads exist in the text, write 'None'.</poc>
 <vendor>Vendor Name or 'Unknown'</vendor>
 <product>Product Name or 'Unknown'</product>
 <keywords>Comma-separated keywords from this exact list: {', '.join(KEYWORD_LIST)}</keywords>"""
@@ -405,7 +502,16 @@ def analyze_individual_cve(cve_id, combined_text_data, thread_models=None):
         {"role": "user", "content": f"Data for {cve_id}:\n{combined_text_data}"}
     ]
 
-    raw_text, model_used = _call_llm_chat(messages, max_tokens=1500, temperature=0.1, custom_models=thread_models)
+    raw_text = None
+    model_used = None
+
+    # Step 1: Targeted High-Yield Execution for Single CVE Analysis
+    if prioritize_poc and not thread_models:
+        raw_text, model_used = _call_llm_targeted(messages, SINGLE_CVE_HIGH_YIELD_MODELS, max_tokens=1500, temperature=0.1)
+
+    # Step 2: Fall back to standard multi-provider cascade if targeted models failed or prioritize_poc is False
+    if not raw_text:
+        raw_text, model_used = _call_llm_chat(messages, max_tokens=1500, temperature=0.1, custom_models=thread_models)
 
     if not raw_text:
         return "API Offline or Rate Limited.", "Try again later.", "None", "Unknown", "Unknown", "None", "Failed (All Models Offline)"
@@ -431,7 +537,25 @@ def analyze_individual_cve(cve_id, combined_text_data, thread_models=None):
     kw = extract_tag(raw_text, 'keywords')
 
     if p:
-        p = p.replace('```html', '').replace('```python', '').replace('```', '').strip()
+        p = p.replace('```html', '').replace('```python', '').replace('```bash', '').replace('```sh', '').replace('```', '').strip()
+        leak_markers = [
+            "Include the exact HTML",
+            "exact HTML/JS/Python",
+            "CRITICAL REQUIREMENTS:",
+            "Do not overlook simple URL payloads",
+            "If none, write 'None'",
+            "If absolutely none exist"
+        ]
+        for marker in leak_markers:
+            if marker in p:
+                p = "\n".join([line for line in p.splitlines() if marker not in line]).strip()
+
+        # If p is a single bare URL, transform into actionable reproduction steps
+        if (p.startswith("http://") or p.startswith("https://")) and "\n" not in p and " " not in p:
+            raw_url = p
+            p = f"Recreation Steps:\n1. Clone exploit repository: git clone {raw_url}\n2. Inspect exploit script and install required dependencies.\n3. Execute against authorized test target according to repository instructions."
+        elif not p or p in ("`, `", "`,", "None.", "N/A"):
+            p = "None"
 
     if s and a and p and v and pr and kw:
         logger.info(f"[SUCCESS] Successfully analyzed {cve_id} using: {model_used}")

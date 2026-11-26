@@ -182,6 +182,101 @@ def query_wayback_cdx_snapshot(url: str, timeout: int = 5):
     return None
 
 
+def fetch_github_repo_content(repo_url: str, max_chars: int = 12000) -> str:
+    """
+    Fetches raw content from a GitHub repository or direct file/blob link.
+    - If blob URL: Converts to raw.githubusercontent.com and fetches raw text.
+    - If repository URL (e.g. https://github.com/owner/repo):
+      Probes raw README.md and any referenced or standard exploit scripts.
+    Returns: Formatted markdown string of repository files, or None on failure.
+    """
+    if not repo_url or "github.com" not in repo_url.lower():
+        return None
+
+    clean_url = repo_url.strip().rstrip('/')
+
+    # Check if this is a direct blob link: github.com/owner/repo/blob/branch/path
+    blob_match = re.match(r'https?://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+)', clean_url, re.IGNORECASE)
+    if blob_match:
+        owner, repo, branch, path = blob_match.groups()
+        raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+        try:
+            r = requests.get(raw_url, headers={"User-Agent": "ATI-PoC-Fetcher/1.0"}, timeout=8)
+            if r.status_code == 200:
+                return r.text[:max_chars]
+        except Exception:
+            pass
+
+    # Extract owner and repo from https://github.com/owner/repo
+    repo_match = re.match(r'https?://github\.com/([^/]+)/([^/#?]+)', clean_url, re.IGNORECASE)
+    if not repo_match:
+        return None
+
+    owner = repo_match.group(1)
+    repo = repo_match.group(2).rstrip('.git')
+
+    # Ignore generic GitHub pages
+    if owner.lower() in ("topics", "explore", "search", "marketplace", "features", "settings", "orgs"):
+        return None
+
+    headers = {"User-Agent": "ATI-PoC-Fetcher/1.0"}
+    branches = ["main", "master", "HEAD"]
+    readme_candidates = ["README.md", "readme.md", "README.txt", "README.rst"]
+
+    readme_text = None
+    found_branch = "main"
+
+    # Step 1: Probe for README
+    for b in branches:
+        for r_name in readme_candidates:
+            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{b}/{r_name}"
+            try:
+                res = requests.get(raw_url, headers=headers, timeout=5)
+                if res.status_code == 200 and len(res.text.strip()) > 30:
+                    readme_text = res.text
+                    found_branch = b
+                    break
+            except Exception:
+                continue
+        if readme_text:
+            break
+
+    output_parts = [f"[GitHub Exploit Repository: {owner}/{repo}]"]
+
+    # Step 2: Check for specific exploit scripts
+    script_candidates = [
+        "poc.py", "exploit.py", "cve_poc.py", "run.sh", "main.py", "poc.sh"
+    ]
+    if readme_text:
+        mentioned_scripts = re.findall(r'[`"\']([a-zA-Z0-9_\-\./]+\.(?:py|sh|go|rb|pl|c|cpp))[`"\']', readme_text)
+        for ms in mentioned_scripts:
+            clean_ms = ms.lstrip('./').strip()
+            if clean_ms and clean_ms not in script_candidates and not clean_ms.startswith(('http', 'test')):
+                script_candidates.insert(0, clean_ms)
+
+    fetched_scripts = []
+    for s_name in script_candidates[:4]:
+        raw_script_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{found_branch}/{s_name}"
+        try:
+            s_res = requests.get(raw_script_url, headers=headers, timeout=5)
+            if s_res.status_code == 200 and len(s_res.text.strip()) > 20:
+                fetched_scripts.append((s_name, s_res.text[:4000]))
+                if len(fetched_scripts) >= 2:
+                    break
+        except Exception:
+            continue
+
+    if readme_text:
+        output_parts.append(f"=== README.md ===\n{readme_text[:6000]}")
+    for s_name, s_content in fetched_scripts:
+        output_parts.append(f"=== Exploit Script: {s_name} ===\n{s_content}")
+
+    if len(output_parts) > 1:
+        return "\n\n".join(output_parts)[:max_chars]
+
+    return None
+
+
 def scrape_url_text(url, max_chars=10000, max_download_bytes=1048576, return_raw_html=False):
     """
     Fetches web content cleanly, following redirects.
@@ -195,6 +290,18 @@ def scrape_url_text(url, max_chars=10000, max_download_bytes=1048576, return_raw
         return (None, None) if return_raw_html else None
 
     url = url.strip()
+
+    # --- GitHub Raw Content Hook ---
+    # Intercept GitHub repository and code links to fetch raw README & exploit files directly
+    if "github.com" in url.lower():
+        u_low = url.lower()
+        if not any(x in u_low for x in ["/releases", "/issues", "/pull/", "/commit/", "/security/advisories", "/tags"]):
+            gh_content = fetch_github_repo_content(url, max_chars=max_chars)
+            if gh_content:
+                if return_raw_html:
+                    return gh_content, f"<html><body><pre>{gh_content}</pre></body></html>"
+                return gh_content
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5"

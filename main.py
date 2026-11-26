@@ -109,7 +109,15 @@ def run_single_cve(cve_id, run_exploit_hunt=False, force_nist_refetch=False, pro
         if u and not scraper.is_known_advisory_url(u) and not scraper.is_product_release_url(u)
     ]
 
-    if non_advisory_l1 and not has_found_poc:
+    # Check if we already have real, working exploit code or just an index
+    cursor.execute("""
+        SELECT count(*) as cnt FROM cve_sources 
+        WHERE cve_id = ? AND is_poc_link = 1 AND details IS NOT NULL 
+        AND (details LIKE '%curl%' OR details LIKE '%python%' OR details LIKE '%whoami%' OR details LIKE '%import requests%' OR details LIKE '%=== Exploit Script%')
+    """, (cve_id,))
+    has_real_exploit_code = cursor.fetchone()['cnt'] > 0
+
+    if non_advisory_l1 and not has_real_exploit_code:
         print(f"[*] Crawling Level 2 onwards from {len(non_advisory_l1)} NIST reference links (Advisories Excluded, Early PoC Exit)...")
         chain_results = scraper.execute_chain_link_crawl(
             cve_id, non_advisory_l1, max_depth=2, max_workers=6, stop_on_poc=True, max_total_urls=12
@@ -132,13 +140,15 @@ def run_single_cve(cve_id, run_exploit_hunt=False, force_nist_refetch=False, pro
                 cursor.execute('UPDATE cve_main SET has_public_poc = 1 WHERE cve_id = ?', (cve_id,))
         conn.commit()
     
-    print(f"\n[*] Sending {cve_id} to Multi-Provider AI Engine for analysis...")
+    print(f"\n[*] Sending {cve_id} to Multi-Provider AI Engine for analysis (Prioritizing High-Yield Models)...")
     cursor.execute('SELECT source_name, details FROM cve_sources WHERE cve_id = ? AND details IS NOT NULL', (cve_id,))
     combined_text = f"CVE ID: {cve_id}\n\n"
     for src in cursor.fetchall():
         combined_text += f"--- Source: {src['source_name']} ---\n{src['details']}\n\n"
         
-    summary, action, poc, ai_vendor, ai_product, keywords, ai_model = llm.analyze_individual_cve(cve_id, combined_text)
+    summary, action, poc, ai_vendor, ai_product, keywords, ai_model = llm.analyze_individual_cve(
+        cve_id, combined_text, prioritize_poc=True
+    )
     
     if summary and not ai_model.startswith("Failed") and summary != "API Offline or Rate Limited.":
         cursor.execute('''
